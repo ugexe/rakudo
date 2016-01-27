@@ -1,6 +1,8 @@
 language: "perl"
-perl:
-    - "5.10"
+
+os:
+    - linux
+    - osx
 
 sudo: false
 
