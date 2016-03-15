@@ -143,6 +143,7 @@ src/core/Perl.pm
 src/core/OS.pm
 src/core/JSON/Pretty.pm
 src/core/Distribution.pm
+src/core/Distribution/Directory.pm
 src/core/CompUnit/DependencySpecification.pm
 src/core/CompUnit/Handle.pm
 src/core/CompUnit/Loader.pm
@@ -156,6 +157,7 @@ src/core/CompUnit/RepositoryRegistry.pm
 src/core/CompUnit/Repository/Locally.pm
 src/core/CompUnit/Repository/FileSystem.pm
 src/core/CompUnit/Repository/Installation.pm
+src/core/CompUnit/Repository/Install.pm
 src/core/CompUnit/Repository/AbsolutePath.pm
 src/core/CompUnit/Repository/NQP.pm
 src/core/CompUnit/Repository/Perl5.pm

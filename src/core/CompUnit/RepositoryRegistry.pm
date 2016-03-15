@@ -3,6 +3,7 @@ class CompUnit::Repository::Installation { ... }
 class CompUnit::Repository::AbsolutePath { ... }
 class CompUnit::Repository::NQP { ... }
 class CompUnit::Repository::Perl5 { ... }
+class CompUnit::Repository::Install { ... }
 
 class CompUnit::RepositoryRegistry {
     my $lock     = Lock.new;
@@ -234,11 +235,12 @@ class CompUnit::RepositoryRegistry {
     }
 
 # prime the short-id -> class lookup
-    short-id2class('file')  = 'CompUnit::Repository::FileSystem';
-    short-id2class('inst')  = 'CompUnit::Repository::Installation';
-    short-id2class('ap')    = 'CompUnit::Repository::AbsolutePath';
-    short-id2class('nqp')   = 'CompUnit::Repository::NQP';
-    short-id2class('perl5') = 'CompUnit::Repository::Perl5';
+    short-id2class('file')    = 'CompUnit::Repository::FileSystem';
+    short-id2class('inst')    = 'CompUnit::Repository::Installation';
+    short-id2class('ap')      = 'CompUnit::Repository::AbsolutePath';
+    short-id2class('nqp')     = 'CompUnit::Repository::NQP';
+    short-id2class('perl5')   = 'CompUnit::Repository::Perl5';
+    short-id2class('install') = 'CompUnit::Repository::Install';
 
     sub parse-include-spec(Str:D $spec, Str:D $default-short-id = 'file') {
         my %options;

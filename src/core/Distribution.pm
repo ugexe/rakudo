@@ -33,6 +33,22 @@ class Distribution {
     }
 }
 
+role Distribution::Interface {
+    method meta     { ... }
+    method content  { ... }
+    method ls-files { ... }
+
+    method Str() {
+        return "{$.meta<name>}"
+        ~ ":ver<{$.meta<ver> // $.meta<version> // ''}>"
+        ~ ":auth<{$.meta<auth> // ''}>"
+        ~ ":api<{$.meta<api> // ''}>";
+    }
+    method id() {
+        return nqp::sha1(self.Str);
+    }
+}
+
 role CompUnit::Repository { ... }
 class CompUnit::RepositoryRegistry is repr('Uninstantiable') { ... }
 class Distribution::Resources does Associative {
