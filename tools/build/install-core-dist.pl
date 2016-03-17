@@ -8,18 +8,14 @@ my %provides =
     "newline"                    => "lib/newline.pm6",
     "experimental"               => "lib/experimental.pm6",
 ;
-
+my %meta =
+    name     => "CORE",
+    auth     => "perl",
+    ver      => $*PERL.version.Str,
+    provides => %provides,
+;
 PROCESS::<$REPO> := CompUnit::RepositoryRegistry.repository-for-spec("inst#@*ARGS[0]");
-$*REPO.install(
-    Distribution.new(
-        name     => "CORE",
-        auth     => "perl",
-        ver      => $*PERL.version.Str,
-        provides => %provides,
-    ),
-    %provides,
-    :force,
-);
+$*REPO.install: Distribution::Hash.new(%meta, :path($*CWD)), :force;
 
 note "installed!";
 

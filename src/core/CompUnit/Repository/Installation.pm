@@ -126,7 +126,7 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
         nqp::sha1($id)
     }
 
-    method install(Distribution $dist, %sources, %scripts?, %resources?, :$force) {
+    method install(Distribution $dist, :$force) {
         $!lock.protect( {
         my @*MODULES;
         my $path   = self!writeable-path or die "No writeable path found, $.prefix not writeable";
@@ -145,35 +145,39 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
         my $bin-dir       = self!bin-dir;
         my $is-win        = Rakudo::Internals.IS-WIN;
 
-        self!add-short-name($dist.name, $dist); # so scripts can find their dist
+        self!add-short-name($dist.meta<name>, $dist); # so scripts can find their dist
 
-        # Walk the to be installed files, decide whether we put them into
-        # "provides" or just "files".
-        for %sources.kv -> $name, $file is copy {
-            $file           = $is-win ?? ~$file.subst('\\', '/', :g) !! ~$file;
+        my %provides;
+        for $dist.meta<provides>.kv -> $name, $relpath is copy {
+            $relpath = $is-win ?? ~$relpath.subst('\\', '/', :g) !! ~$relpath;
             # $name is "Inline::Perl5" while $file is "lib/Inline/Perl5.pm6"
             my $id          = self!file-id($name, $dist-id);
             my $destination = $sources-dir.child($id);
             self!add-short-name($name, $dist);
-            $dist.provides{ $name } = {
+            %provides{ $name } = {
                 pm => {
                     :file($id),
-                    :time(try $file.IO.modified.Num),
+                    :time(now.Int),
                     :$!cver
                 }
             };
-            note("Installing {$name} for {$dist.name}") if $verbose and $name ne $dist.name;
-            copy($file, $destination);
+            note("Installing {$name} for {$dist.meta<name>}") if $verbose and $name ne $dist.meta<name>;
+            my $handle = $dist.content('provides', $name, $relpath).open(:bin);
+            my $buf    = $handle.slurp-rest(:bin);
+            $handle.close;
+            $destination.spurt($buf, :bin);
         }
 
-        for %scripts.kv -> $basename, $file is copy {
-            $file           = $is-win ?? ~$file.subst('\\', '/', :g) !! ~$file;
-            my $id          = self!file-id($file, $dist-id);
+        my %files;
+        for $dist.files('bin') -> $relpath is copy {
+            $relpath        = $is-win ?? ~$relpath.subst('\\', '/', :g) !! ~$relpath;
+            my $basename    = $relpath.IO.basename;
+            my $id          = self!file-id($relpath, $dist-id);
             my $destination = $resources-dir.child($id);
             my $withoutext  = $basename.subst(/\.[exe|bat]$/, '');
             for '', '-j', '-m' -> $be {
                 "$path/bin/$withoutext$be".IO.spurt:
-                    $perl_wrapper.subst('#name#', $basename, :g).subst('#perl#', "perl6$be").subst('#dist-name#', $dist.name);
+                    $perl_wrapper.subst('#name#', $basename, :g).subst('#perl#', "perl6$be").subst('#dist-name#', $dist.meta<name>);
                 if $is-win {
                     "$path/bin/$withoutext$be.bat".IO.spurt:
                         $windows_wrapper.subst('#perl#', "perl6$be", :g);
@@ -183,25 +187,35 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
                 }
             }
             self!add-short-name($basename, $dist);
-            $dist.files{"bin/$basename"} = $id;
-            copy($file, $destination);
+            %files{"bin/$basename"} = $id;
+            my $handle = $dist.content($relpath).open(:bin);
+            my $buf    = $handle.slurp-rest(:bin);
+            $handle.close;
+            $destination.spurt($buf, :bin);
         }
 
-        for %resources.kv -> $name, $file is copy {
-            $file              = $is-win ?? ~$file.subst('\\', '/', :g) !! ~$file;
+        for |$dist.meta<resources>.grep(*.defined) -> $relpath is copy {
+            my $name        = $relpath.IO.basename;
+            $relpath        = $is-win ?? ~$relpath.subst('\\', '/', :g) !! ~$relpath;
             # $name is 'libraries/p5helper' while $file is 'resources/libraries/libp5helper.so'
-            my $id             = self!file-id($name, $dist-id) ~ '.' ~ $file.IO.extension;
-            my $destination    = $resources-dir.child($id);
-            $dist.files{$name} = $id;
-            copy($file, $destination);
+            my $id          = self!file-id($name, $dist-id) ~ '.' ~ $relpath.IO.extension;
+            my $destination = $resources-dir.child($id);
+            %files{$name} = $id;
+            my $handle = $dist.content('resources', |$relpath.split('/')).open(:bin);
+            my $buf    = $handle.slurp-rest(:bin);
+            $handle.close;
+            $destination.spurt($buf, :bin);
         }
 
-        $dist-dir.child($dist-id).spurt: to-json($dist.Hash);
+        my %meta = %($dist.meta);
+        %meta<files>    = %files;
+        %meta<provides> = %provides;
+        $dist-dir.child($dist-id).spurt: to-json(%meta);
 
         my $precomp = $*REPO.precomp-repository;
         my $*RESOURCES = Distribution::Resources.new(:repo(self), :$dist-id);
         my %done;
-        for $dist.provides.values.map(*.values[0]<file>) -> $id {
+        for %provides.values.map(*.values[0]<file>) -> $id {
             my $source = $sources-dir.child($id);
             if $precomp.may-precomp {
                 my $rev-deps-file = ($precomp.store.path($*PERL.compiler.id, $id) ~ '.rev-deps').IO;
@@ -228,8 +242,8 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
     } ) }
 
     method uninstall(Distribution $dist) {
-        my %provides      = $dist.provides;
-        my %files         = $dist.files;
+        my %provides      = $dist.meta<provides>;
+        my %files         = $dist.ls-files.classify(*.IO.basename);
         my $sources-dir   = self.prefix.child('sources');
         my $resources-dir = self.prefix.child('resources');
         my $bin-dir       = self.prefix.child('bin');
@@ -298,20 +312,22 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
     )
         returns CompUnit
     {
-        my ($dist-id, $dist) = self!matching-dist($spec);
+        my ($dist-id, $meta) = self!matching-dist($spec);
         if $dist-id {
             my $loader = $.prefix.child('sources').child(
-                $dist<provides>{$spec.short-name}<pm pm6>.first(*.so)<file>
+                $meta<provides>{$spec.short-name}<pm pm6>.first(*.so)<file>
             );
             my $id = $loader.basename;
+            my $dist-dir = self!dist-dir.child($dist-id);
+            my $dist = Distribution::Hash.new($meta, :path($dist-dir));
             return CompUnit.new(
                 :handle(CompUnit::Handle),
                 :short-name($spec.short-name),
-                :version($dist<ver>),
-                :auth($dist<auth> // Str),
+                :version($meta<ver>),
+                :auth($meta<auth> // Str),
                 :repo(self),
                 :repo-id($id),
-                :distribution(Distribution.new(|$dist)),
+                :distribution($dist),
             );
         }
         return self.next-repo.resolve($spec) if self.next-repo;
@@ -324,28 +340,30 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
     )
         returns CompUnit:D
     {
-        my ($dist-id, $dist) = self!matching-dist($spec);
+        my ($dist-id, $meta) = self!matching-dist($spec);
         if $dist-id {
             return %!loaded{$spec.short-name} if %!loaded{$spec.short-name}:exists;
 
             my $loader = $.prefix.child('sources').child(
-                $dist<provides>{$spec.short-name}<pm pm6>.first(*.so)<file>
+                $meta<provides>{$spec.short-name}<pm pm6>.first(*.so)<file>
             );
             my $*RESOURCES = Distribution::Resources.new(:repo(self), :$dist-id);
             my $id = $loader.basename;
             my $handle = $precomp.try-load($id, $loader);
             my $precompiled = defined $handle;
             $handle //= CompUnit::Loader.load-source-file($loader);
+            my $dist-dir = self!dist-dir.child($dist-id);
+            my $dist = Distribution::Hash.new($meta, :path($dist-dir));
 
             my $compunit = CompUnit.new(
                 :$handle,
                 :short-name($spec.short-name),
-                :version($dist<ver>),
-                :auth($dist<auth> // Str),
+                :version($meta<ver>),
+                :auth($meta<auth> // Str),
                 :repo(self),
                 :repo-id($id),
                 :$precompiled,
-                :distribution(Distribution.new(|$dist)),
+                :distribution($dist),
             );
             return %!loaded{$compunit.short-name} = $compunit;
         }
@@ -354,8 +372,8 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
     }
 
     method resource($dist-id, $key) {
-        my $dist = from-json(self!dist-dir.child($dist-id).slurp);
-        self!resources-dir.child($dist<files>{$key})
+        my $meta = from-json(self!dist-dir.child($dist-id).slurp);
+        self!resources-dir.child($meta<files>{$key})
     }
 
     method id() {
