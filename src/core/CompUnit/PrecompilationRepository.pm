@@ -216,17 +216,16 @@ class CompUnit::PrecompilationRepository::Default does CompUnit::PrecompilationR
         %ENV.DELETE-KEY(<RAKUDO_PRECOMP_LOADING>);
         %ENV<RAKUDO_PRECOMP_DIST> = $current_dist;
 
+        my $error  = $proc.err.lines.join("\n");
         my @result = $proc.out.lines.unique;
         if not $proc.out.close or $proc.status {  # something wrong
             self.store.unlock;
             $RMD("Precomping $path failed: $proc.status()") if $RMD;
             Rakudo::Internals.VERBATIM-EXCEPTION(1);
-            die $proc.err.slurp-rest;
+            die $error;
         }
 
-        if $proc.err.slurp-rest -> $warnings {
-            $*ERR.print($warnings);
-        }
+        $*ERR.print($error) if $error;
         unless $bc.e {
             $RMD("$path aborted precompilation without failure") if $RMD;
             self.store.unlock;
