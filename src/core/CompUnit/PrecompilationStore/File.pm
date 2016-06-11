@@ -76,15 +76,15 @@ class CompUnit::PrecompilationStore::File does CompUnit::PrecompilationStore {
                 CompUnit::PrecompilationId $precomp-id)
     {
         self.prefix
-            .child($compiler-id.IO)
-            .child($precomp-id.substr(0, 2).IO)
+            .child($compiler-id)
+            .child($precomp-id.substr(0, 2))
     }
 
     method path(CompUnit::PrecompilationId $compiler-id,
                  CompUnit::PrecompilationId $precomp-id,
                  Str :$extension = '')
     {
-        self!dir($compiler-id, $precomp-id).child(($precomp-id ~ $extension).IO)
+        self!dir($compiler-id, $precomp-id).child($precomp-id ~ $extension)
     }
 
     method !lock() {
@@ -139,11 +139,11 @@ class CompUnit::PrecompilationStore::File does CompUnit::PrecompilationStore {
                  Str :$extension = '')
         returns IO::Path
     {
-        my $compiler-dir = self.prefix.child($compiler-id.IO);
+        my $compiler-dir = self.prefix.child($compiler-id);
         $compiler-dir.mkdir unless $compiler-dir.e;
         my $dest = self!dir($compiler-id, $precomp-id);
         $dest.mkdir unless $dest.e;
-        $dest.child(($precomp-id ~ $extension).IO)
+        $dest.child($precomp-id ~ $extension)
     }
 
     method store-file(CompUnit::PrecompilationId $compiler-id,
@@ -180,7 +180,7 @@ class CompUnit::PrecompilationStore::File does CompUnit::PrecompilationStore {
 
     method delete-by-compiler(CompUnit::PrecompilationId $compiler-id)
     {
-         my $compiler-dir = self.prefix.child($compiler-id.IO);
+         my $compiler-dir = self.prefix.child($compiler-id);
          for $compiler-dir.dir -> $subdir {
              $subdir.dir>>.unlink;
              $subdir.rmdir;
