@@ -1,6 +1,7 @@
 class CompUnit::Repository::FileSystem does CompUnit::Repository::Locally does CompUnit::Repository {
     has %!loaded;
     has $!precomp;
+    has $!meta; # cache `provides` of META6 when available
 
     my %extensions =
       Perl6 => <pm6 pm>,
@@ -18,37 +19,24 @@ class CompUnit::Repository::FileSystem does CompUnit::Repository::Locally does C
 
             my $base := $!prefix.child($name.subst(:g, "::", $*SPEC.dir-sep) ~ '.').Str;
             return $base if %seen{$base}:exists;
-            my $found;
 
-            # find source file
-            # pick a META6.json if it is there
-            if (my $meta = $!prefix.child('META6.json')) && $meta.f {
-                try {
-                    my $json = Rakudo::Internals::JSON.from-json: $meta.slurp;
-                    if $json<provides>{$name} -> $file {
-                        my $path = $file.IO.is-absolute ?? $file.IO !! $!prefix.child($file);
-                        $found = $path if $path.f;
-                    }
-
-                    CATCH {
-                        when JSONException {
-                            fail "Invalid JSON found in META6.json";
-                        }
+            $!meta //= try {
+                CATCH {
+                    when JSONException {
+                        fail "Invalid JSON found in META6.json";
                     }
                 }
-            }
+                my $meta-path = $!prefix.child('META6.json');
+                my %meta-hash = Rakudo::Internals::JSON.from-json($meta-path.slurp).hash\
+                    if $meta-path.e && $meta-path.f;
+                %meta-hash<provides>;
+            };
 
-            unless ?$found {
-                # deduce path to compilation unit from package name
-                if %extensions<Perl6> -> @extensions {
-                    for @extensions -> $extension {
-                        my $path = $base ~ $extension;
-                        $found = $path.IO if IO::Path.new-from-absolute-path($path).f;
-                    }
-                }
-            }
+            my $found = $!meta{$name} && $!meta{$name}.IO.f
+                ?? $!meta{$name}
+                !! %extensions<Perl6>.map({ $base ~ $_ }).first(*.IO.e);
 
-            return $base, $found if $found;
+            return $base, $found.IO if $found;
         }
         False
     }
