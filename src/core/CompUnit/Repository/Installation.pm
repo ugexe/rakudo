@@ -127,6 +127,7 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
 
         for $short-dir.dir -> $dir {
             $dir.child($id).unlink;
+            $dir.rmdir unless $dir.dir;
         }
     }
 
@@ -162,7 +163,7 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
         my $version = self!repository-version;
         my $short-dir = $.prefix.child('short');
         mkdir $short-dir unless $short-dir.e;
-        my $precomp-dir = $.prefix.child('precomp');
+        my $precomp-dir = $.prefix.child('precomp');re
         mkdir $precomp-dir unless $precomp-dir.e;
         self!sources-dir;
         my $resources-dir = self!resources-dir;
