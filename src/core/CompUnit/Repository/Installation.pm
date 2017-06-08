@@ -427,38 +427,6 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
         @candi
     }
 
-    method !matching-dist(CompUnit::DependencySpecification $spec) {
-        if $spec.from eq 'Perl6' {
-            my $repo-version = self!repository-version;
-            my $lookup = $.prefix.add('short').add(nqp::sha1($spec.short-name));
-            if $lookup.e {
-                my @dists = (
-                        $repo-version < 1
-                        ?? $lookup.lines.unique.map({
-                                $_ => self!read-dist($_)
-                            })
-                        !! $lookup.dir.map({
-                                my ($ver, $auth, $api, $source, $checksum) = $_.slurp.split("\n");
-                                $_.basename => {
-                                    ver      => Version.new( $ver || 0 ),
-                                    auth     => $auth,
-                                    api      => $api,
-                                    source   => $source || Any,
-                                    checksum => $checksum || Str,
-                                }
-                            })
-                    ).grep({
-                        $_.value<auth> ~~ $spec.auth-matcher
-                        and $_.value<ver> ~~ $spec.version-matcher
-                    });
-                for @dists.sort(*.value<ver>).reverse.map(*.kv) -> ($dist-id, $dist) {
-                    return ($dist-id, $dist);
-                }
-            }
-        }
-        Nil
-    }
-
     method !lazy-distribution($dist-id) {
         class :: does Distribution::Locally {
             has $.dist-id;
@@ -477,21 +445,57 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
         )
     }
 
+    # previously !matching-dist (but now returns a list)
+    method !candidates(CompUnit::DependencySpecification $spec) {
+        if $spec.from eq 'Perl6' {
+            my $lookup = $.prefix.add('short').add(nqp::sha1($spec.short-name));
+            if $lookup.e {
+                my @dists = (
+                        self!repository-version < 1
+                            ?? $lookup.lines.unique.map({
+                                    $_ => self!read-dist($_)
+                                })
+                            !! $lookup.dir.map({
+                                    my ($ver, $auth, $api, $source, $checksum) = $_.slurp.split("\n");
+                                    $_.basename => {
+                                        ver      => Version.new( $ver || 0 ),
+                                        auth     => $auth,
+                                        api      => $api,
+                                        source   => $source || Any,
+                                        checksum => $checksum || Str,
+                                    }
+                                })
+                    ).grep({
+                        $_.value<auth> ~~ $spec.auth-matcher
+                        and $_.value<ver> ~~ $spec.version-matcher
+                    });
+
+                return @dists.sort(*.value<ver>).reverse;
+            }
+        }
+        Empty
+    }
+
+    # Recommendation manager interface
+    method candidates(CompUnit::DependencySpecification $spec) {
+        self!candidates($spec).map({ self!lazy-distribution( $_.key ) });
+    }
+
     method resolve(
         CompUnit::DependencySpecification $spec,
         --> CompUnit:D)
     {
-        my ($dist-id, $dist) = self!matching-dist($spec);
-        if $dist-id {
+        if self.candidates($spec).head -> $dist {
+            my $meta = $dist.meta.hash;
             # xxx: replace :distribution with meta6
             return CompUnit.new(
                 :handle(CompUnit::Handle),
                 :short-name($spec.short-name),
-                :version($dist<ver>),
-                :auth($dist<auth> // Str),
+                :version($meta<ver>),
+                :auth($meta<auth> // Str),
                 :repo(self),
-                :repo-id($dist<source> // self!read-dist($dist-id)<provides>{$spec.short-name}.values[0]<file>),
-                :distribution(self!lazy-distribution($dist-id)),
+                :repo-id($meta<source> // $meta<provides>{$spec.short-name}.values[0]<file>),
+                :distribution($dist),
             );
         }
         return self.next-repo.resolve($spec) if self.next-repo;
@@ -510,25 +514,25 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
         CompUnit::PrecompilationStore :@precomp-stores = self!precomp-stores(),
         --> CompUnit:D)
     {
-        my ($dist-id, $dist) = self!matching-dist($spec);
-        if $dist-id {
+        if self.candidates($spec).head -> $dist {
             return %!loaded{~$spec} if %!loaded{~$spec}:exists;
-            my $source-file-name = $dist<source>
+            my $meta = $dist.meta.hash;
+            my $source-file-name = $meta<source>
                 // do {
-                    my $provides = self!read-dist($dist-id)<provides>;
+                    my $provides = $meta<provides>;
                     X::CompUnit::UnsatisfiedDependency.new(:specification($spec)).throw
                         unless $provides{$spec.short-name}:exists;
                     $provides{$spec.short-name}.values[0]<file>
                 };
             my $loader = $.prefix.add('sources').add($source-file-name);
-            my $*RESOURCES = Distribution::Resources.new(:repo(self), :$dist-id);
+            my $*RESOURCES = Distribution::Resources.new(:repo(self), :dist-id($dist.dist-id));
             my $id = $loader.basename;
             my $repo-prefix = self!repo-prefix;
             my $handle = $precomp.try-load(
                 CompUnit::PrecompilationDependency::File.new(
                     :id(CompUnit::PrecompilationId.new($id)),
                     :src($repo-prefix ?? $repo-prefix ~ $loader.relative($.prefix) !! $loader.absolute),
-                    :checksum($dist<checksum>:exists ?? $dist<checksum> !! Str),
+                    :checksum($meta<checksum>:exists ?? $meta<checksum> !! Str),
                     :$spec,
                 ),
                 :source($loader),
@@ -541,12 +545,12 @@ sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
             my $compunit = CompUnit.new(
                 :$handle,
                 :short-name($spec.short-name),
-                :version($dist<ver>),
-                :auth($dist<auth> // Str),
+                :version($meta<ver>),
+                :auth($meta<auth> // Str),
                 :repo(self),
                 :repo-id($id),
                 :$precompiled,
-                :distribution(self!lazy-distribution($dist-id)),
+                :distribution($dist),
             );
             return %!loaded{~$spec} = $compunit;
         }
