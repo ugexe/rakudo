@@ -123,16 +123,42 @@ class Version {
     method plus()  { nqp::p6bool($!plus) }
 }
 
-
 multi sub infix:<eqv>(Version:D \a, Version:D \b) {
-    nqp::p6bool(
-      nqp::eqaddr(a,b)
-        || (nqp::eqaddr(a.WHAT,b.WHAT)
-             && nqp::iseq_s(
-               nqp::getattr_s(a,Version,'$!string'),
-               nqp::getattr_s(b,Version,'$!string')
-             ))
-    )
+    return True if nqp::eqaddr(a,b);
+    return False unless nqp::iseq_i(
+        nqp::getattr_i(a,Version,'$!plus'),
+        nqp::getattr_i(b,Version,'$!plus')
+    );
+    return True if nqp::iseq_s( # must come after $!plus check
+        nqp::getattr_s(a,Version,'$!string'),
+        nqp::getattr_s(b,Version,'$!string')
+    );
+
+    my $aparts := nqp::getattr(a,Version,'$!parts');
+    my $bparts := nqp::getattr(b,Version,'$!parts');
+    my int $aelems    = nqp::elems($aparts);
+    my int $belems    = nqp::elems($bparts);
+    my int $max-elems = nqp::if(nqp::islt_i($aelems, $belems), $aelems, $belems);
+
+    my int $i = -1;
+    while nqp::islt_i(++$i,$max-elems) {
+        my $apart := nqp::atpos($aparts,$i);
+        my $bpart := nqp::atpos($bparts,$i);
+        my str $astr = nqp::if(nqp::isnull($apart), '', "$apart");
+        my str $bstr = nqp::if(nqp::isnull($bpart), '', "$bpart");
+        next if nqp::iseq_s($astr, $bstr);
+
+        # Pad the shorter part string with 0 to even the length for a string comparison
+        my int $achars = nqp::chars($astr);
+        my int $bchars = nqp::chars($bstr);
+        my str $a-pad  = nqp::x('0', nqp::if(nqp::islt_i($achars, $bchars), 0, $bchars - $achars));
+        my str $b-pad  = nqp::x('0', nqp::if(nqp::islt_i($bchars, $achars), 0, $achars - $bchars));
+        return False unless nqp::iseq_s(
+            nqp::concat($astr, $a-pad),
+            nqp::concat($bstr, $b-pad)
+        );
+    }
+    True
 }
 
 multi sub infix:<cmp>(Version:D \a, Version:D \b) {
