@@ -351,6 +351,15 @@ sub MAIN(:$name, :$auth, :$ver, *@, *%) {
         unlink( $dist-dir.add($dist.id) )
     }
 
+
+    method script($file, :$name!, :$auth, :$ver) {
+        Rakudo::Deprecations.DEPRECATED('CompUnit::Repository::Installation.files(...)');
+
+        with self.files($file, :$name, :$auth, :$ver) {
+            return $_.head<source>;
+        }
+    }
+
     # Ideally this would return Distributions, but it'd break older bin/ scripts
     proto method files(|) {*}
     multi method files($file, Str:D :$name!, :$auth, :$ver, :$api) {
