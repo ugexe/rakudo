@@ -154,7 +154,7 @@ sub MAIN(:$name, :$auth, :$ver, *@, *%) {
             $link ~~ Str ?? ($link => $link) !! ($link.keys[0] => $link.values[0])
         }
 
-        $!lock.protect( {
+        $!lock.protect: {
         my @*MODULES;
         my $path   = self!writeable-path or die "No writeable path found, $.prefix not writeable";
         my $lock = $.prefix.add('repo.lock').open(:create, :w);
@@ -253,43 +253,69 @@ sub MAIN(:$name, :$auth, :$ver, *@, *%) {
         # identity changes with every installation of a dist.
         $!id = Any;
 
-        {
+        self!precompile(:$dist);
+
+        $lock.unlock;
+        }
+    }
+
+    method !precompile(:$dist) {
+        $!lock.protect: {
             my $head = $*REPO;
             PROCESS::<$REPO> := self; # Precomp files should only depend on downstream repos
             my $precomp = $*REPO.precomp-repository;
             my $repo-prefix = self!repo-prefix;
+            my $dist-id = $dist.id;
             my $*DISTRIBUTION = CompUnit::Repository::Distribution.new($dist, :repo(self), :$dist-id);
             my $*RESOURCES = Distribution::Resources.new(:repo(self), :$dist-id);
             my %done;
 
             my $compiler-id = CompUnit::PrecompilationId.new-without-check($*PERL.compiler.id);
-            for %provides.kv -> $source-name, $source-meta {
-                my $id = CompUnit::PrecompilationId.new-without-check($source-meta.values[0]<file>);
+            for $dist.meta<provides>.kv -> $source-name, $source-meta {
+                my $id = CompUnit::PrecompilationId.new-without-check(self!file-id($source-name, $dist-id));
                 $precomp.store.delete($compiler-id, $id);
             }
 
-            for %provides.kv -> $source-name, $source-meta {
-                my $id = $source-meta.values[0]<file>;
-                my $source = $sources-dir.add($id);
+            for $dist.meta<provides>.kv -> $name-path, $source-meta {
+                my $id          = self!file-id($name-path, $dist-id);
+                my $source      = self!sources-dir.add($id);
                 my $source-file = $repo-prefix ?? $repo-prefix ~ $source.relative($.prefix) !! $source;
 
                 if %done{$id} {
                     note "(Already did $id)" if $verbose;
                     next;
                 }
-                note("Precompiling $id ($source-name)") if $verbose;
+                note("Precompiling $id ($name-path)") if $verbose;
                 $precomp.precompile(
                     $source,
                     CompUnit::PrecompilationId.new-without-check($id),
-                    :source-name("$source-file ($source-name)"),
+                    :source-name("$source-file ($name-path)"),
                 );
                 %done{$id} = 1;
             }
+
+            for $dist.meta<files>.kv -> $name-path, $file is copy {
+                next unless $name-path.starts-with('bin/');
+                my $id          = self!file-id($name-path, $dist-id);
+                my $source      = self!resources-dir.add($id);
+                my $source-file = $repo-prefix ?? $repo-prefix ~ $source.relative($.prefix) !! $source;
+
+                if %done{$id} {
+                    note "(Already did $id)" if $verbose;
+                    next;
+                }
+                note("Precompiling $id ($name-path)") if $verbose;
+                try $precomp.precompile( # if this isn't a perl6 script it will fail to precompile
+                    $source,
+                    CompUnit::PrecompilationId.new-without-check($id),
+                    :source-name("$source-file ($name-path)"),
+                );
+                %done{$id} = 1;
+            }
+
             PROCESS::<$REPO> := $head;
         }
-
-        $lock.unlock;
-    } ) }
+    }
 
     method uninstall(Distribution $distribution) {
         my $repo-version = self!repository-version;
