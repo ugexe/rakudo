@@ -59,6 +59,44 @@ my class IO::Handle {
     method do-not-close-automatically(IO::Handle:D: --> False) { }
 #?endif
 
+    method from-native-descriptor(IO::Handle:U: Int:D $nd,
+      :$enc is copy,
+      :$bin,
+      :$chomp = Bool::True,
+      :$nl-in is copy = ("\x0A", "\r\n"),
+      Str:D :$nl-out is copy = "\n",
+      :$out-buffer,
+      --> IO::Handle:D
+    ) {
+        nqp::if(
+          $bin,
+          nqp::isconcrete($enc) && X::IO::BinaryAndEncoding.new.throw,
+          nqp::unless(nqp::isconcrete($enc), $enc = 'utf8'));
+        my $handle := nqp::create(self);
+        {
+            # An invalid fd surfaces as Failure rather than a thrown exception.
+            CATCH { .fail }
+            nqp::bindattr($handle, IO::Handle, '$!PIO',
+              nqp::syscall("open-handle-from-fd", nqp::unbox_i($nd)));
+        }
+        # fd-based handles do not own the underlying fd — the caller retains
+        # responsibility for its lifetime.  Omitting remember-to-close is
+        # intentional: process-exit cleanup must not close fds it didn't open.
+        nqp::bindattr($handle, IO::Handle, '$!chomp',  $chomp);
+        nqp::bindattr($handle, IO::Handle, '$!nl-out', $nl-out);
+        if nqp::isconcrete($enc) {
+            my $encoding = Encoding::Registry.find($enc);
+            my $dec := $encoding.decoder(:translate-nl);
+            $dec.set-line-separators($nl-in.list);
+            nqp::bindattr($handle, IO::Handle, '$!decoder',  $dec);
+            nqp::bindattr($handle, IO::Handle, '$!encoder',  $encoding.encoder(:translate-nl));
+            nqp::bindattr($handle, IO::Handle, '$!encoding', $encoding.name);
+            nqp::bindattr($handle, IO::Handle, '$!nl-in',    $nl-in);
+        }
+        $handle!set-out-buffer-size($out-buffer);
+        $handle
+    }
+
     method open(IO::Handle:D:
       :$r, :$w, :$x, :$a, :$update,
       :$rw, :$rx, :$ra,
