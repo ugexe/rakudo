@@ -180,7 +180,6 @@ augment class Any {
 
     # Common logic for minpairs / maxpairs
     method !minmaxpairs(\order, &by) {
-        my &comparator := aritize22(&by);
         my $iter   := self.pairs.iterator;
         my $result := nqp::create(IterationBuffer);
 
@@ -192,24 +191,55 @@ augment class Any {
 
         nqp::unless(
           nqp::eqaddr($pair,IterationEnd),
-          nqp::stmts(                               # found at least one value
-            nqp::push($result,$pair),
-            nqp::until(
-              nqp::eqaddr(nqp::bind($pair,$iter.pull-one),IterationEnd),
-              nqp::if(
-                nqp::isconcrete(my $value := $pair.value),
+          nqp::if(
+            # 2-arg &by is already a comparator; use directly
+            nqp::iseq_i(&by.arity, 2),
+            nqp::stmts(                             # found at least one value
+              nqp::push($result,$pair),
+              nqp::until(
+                nqp::eqaddr(nqp::bind($pair,$iter.pull-one),IterationEnd),
                 nqp::if(
-                  nqp::eqaddr(
-                    (my $cmp-result := comparator($value,$target)),
-                    order
-                  ),
-                  nqp::stmts(                       # new best
-                    nqp::push(nqp::setelems($result,0),$pair),
-                    nqp::bind($target,$value)
-                  ),
-                  nqp::if(                          # additional best
-                    nqp::eqaddr($cmp-result,Order::Same),
-                    nqp::push($result,$pair)
+                  nqp::isconcrete(my $value := $pair.value),
+                  nqp::if(
+                    nqp::eqaddr(
+                      (my $cmp-result := by($value,$target)),
+                      order
+                    ),
+                    nqp::stmts(                     # new best
+                      nqp::push(nqp::setelems($result,0),$pair),
+                      nqp::bind($target,$value)
+                    ),
+                    nqp::if(                        # additional best (tie)
+                      nqp::eqaddr($cmp-result,Order::Same),
+                      nqp::push($result,$pair)
+                    )
+                  )
+                )
+              )
+            ),
+            # 1-arg &by is a key function: Schwartzian transform.
+            # Cache the current best's key so it's computed once per element.
+            nqp::stmts(
+              nqp::push($result,$pair),
+              (my $target-key = by($target)),
+              nqp::until(
+                nqp::eqaddr(nqp::bind($pair,$iter.pull-one),IterationEnd),
+                nqp::if(
+                  nqp::isconcrete(my $val := $pair.value),
+                  nqp::stmts(
+                    (my $val-key = by($val)),
+                    nqp::if(
+                      nqp::eqaddr($val-key cmp $target-key, order),
+                      nqp::stmts(                   # new best
+                        nqp::push(nqp::setelems($result,0),$pair),
+                        nqp::bind($target,$val),
+                        ($target-key = $val-key)
+                      ),
+                      nqp::if(                      # additional best (tie)
+                        nqp::eqaddr($val-key cmp $target-key, Order::Same),
+                        nqp::push($result,$pair)
+                      )
+                    )
                   )
                 )
               )
@@ -476,10 +506,14 @@ augment class Any {
     }
     multi method minmax(Any:D: :&by!) { self.minmax(&by, |%_) }
     multi method minmax(Any:D: &by) {
+        # Cache arity once; 2-arg &by is a comparator, 1-arg is a key function.
+        # For Range/Positional elements we always need a 2-arg comparator.
+        my int $is-cmp = nqp::iseq_i(&by.arity, 2);
+        my &comparator = $is-cmp ?? &by !! { by($^a) cmp by($^b) };
+
         nqp::if(
           (my $iter := self.iterator-and-first(".minmax",my $pulled)),
           nqp::stmts(
-            (my &comparator = aritize22(&by)),
             nqp::if(
               nqp::istype($pulled,Range),
               self!minmax-range-init($pulled,
@@ -491,24 +525,76 @@ augment class Any {
                 ($min = $max = $pulled)
               )
             ),
+            # For 1-arg key functions: cache initial min/max keys.
+            # Scalar init sets $min === $max from the same element, so reuse the key.
+            nqp::unless(
+              $is-cmp,
+              nqp::stmts(
+                (my $min-key = by($min)),
+                (my $max-key = (nqp::istype($pulled,Range) || nqp::istype($pulled,Positional))
+                  ?? by($max) !! $min-key)
+              )
+            ),
             nqp::until(
               nqp::eqaddr(($pulled := $iter.pull-one),IterationEnd),
               nqp::if(
                 nqp::isconcrete($pulled),
                 nqp::if(
                   nqp::istype($pulled,Range),
-                  self!cmp-minmax-range-check($pulled,
-                     &comparator,$min,$excludes-min,$max,$excludes-max),
+                  nqp::stmts(
+                    self!cmp-minmax-range-check($pulled,
+                       &comparator,$min,$excludes-min,$max,$excludes-max),
+                    # Range may have updated $min/$max; resync cached keys
+                    nqp::unless(
+                      $is-cmp,
+                      nqp::stmts(
+                        ($min-key = by($min)),
+                        ($max-key = by($max))
+                      )
+                    )
+                  ),
                   nqp::if(
                     nqp::istype($pulled,Positional),
-                    self!cmp-minmax-range-check($pulled.minmax(&by),
-                       &comparator,$min,$excludes-min,$max,$excludes-max),
+                    nqp::stmts(
+                      self!cmp-minmax-range-check($pulled.minmax(&by),
+                         &comparator,$min,$excludes-min,$max,$excludes-max),
+                      nqp::unless(
+                        $is-cmp,
+                        nqp::stmts(
+                          ($min-key = by($min)),
+                          ($max-key = by($max))
+                        )
+                      )
+                    ),
                     nqp::if(
-                      nqp::eqaddr(comparator($pulled,$min),Order::Less),
-                      ($min = $pulled),
+                      $is-cmp,
+                      # 2-arg comparator: original logic
                       nqp::if(
-                        nqp::eqaddr(comparator($pulled,$max),Order::More),
-                        ($max = $pulled)
+                        nqp::eqaddr(comparator($pulled,$min),Order::Less),
+                        ($min = $pulled),
+                        nqp::if(
+                          nqp::eqaddr(comparator($pulled,$max),Order::More),
+                          ($max = $pulled)
+                        )
+                      ),
+                      # 1-arg key function: Schwartzian transform.
+                      # $pulled-key computed once, compared against both cached keys.
+                      nqp::stmts(
+                        (my $pulled-key = by($pulled)),
+                        nqp::if(
+                          nqp::eqaddr($pulled-key cmp $min-key,Order::Less),
+                          nqp::stmts(
+                            ($min = $pulled),
+                            ($min-key = $pulled-key)
+                          ),
+                          nqp::if(
+                            nqp::eqaddr($pulled-key cmp $max-key,Order::More),
+                            nqp::stmts(
+                              ($max = $pulled),
+                              ($max-key = $pulled-key)
+                            )
+                          )
+                        )
                       )
                     )
                   )
