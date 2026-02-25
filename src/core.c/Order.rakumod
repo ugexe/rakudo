@@ -248,16 +248,39 @@ augment class Any {
     }
     multi method min(Any:D: :&by!) { self.min(&by, |%_) }
     multi method min(Any:D: &by) {
-        my &comparator := aritize22(&by);
-
         nqp::if(
           (my $iter := self.iterator-and-first(".min", my $min)),
-          nqp::until(
-            nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
-            nqp::if(
-              (nqp::isconcrete($pulled)
-                && nqp::eqaddr(comparator($pulled,$min),Order::Less)),
-              $min = $pulled
+          nqp::if(
+            # 2-arg &by is already a comparator; use directly
+            nqp::iseq_i(&by.arity, 2),
+            nqp::until(
+              nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
+              nqp::if(
+                (nqp::isconcrete($pulled)
+                  && nqp::eqaddr(by($pulled,$min),Order::Less)),
+                $min = $pulled
+              )
+            ),
+            # 1-arg &by is a key function: Schwartzian transform.
+            # Cache the current best's key so it's computed once per element.
+            nqp::stmts(
+              (my $min-key = by($min)),
+              nqp::until(
+                nqp::eqaddr((my $pulled2 := $iter.pull-one),IterationEnd),
+                nqp::if(
+                  nqp::isconcrete($pulled2),
+                  nqp::stmts(
+                    (my $pulled-key = by($pulled2)),
+                    nqp::if(
+                      nqp::eqaddr($pulled-key cmp $min-key,Order::Less),
+                      nqp::stmts(
+                        ($min = $pulled2),
+                        ($min-key = $pulled-key)
+                      )
+                    )
+                  )
+                )
+              )
             )
           )
         );
@@ -305,16 +328,39 @@ augment class Any {
     }
     multi method max(Any:D: :&by!) { self.max(&by, |%_) }
     multi method max(Any:D: &by) {
-        my &comparator := aritize22(&by);
-
         nqp::if(
           (my $iter := self.iterator-and-first(".max", my $max)),
-          nqp::until(
-            nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
-            nqp::if(
-              (nqp::isconcrete($pulled)
-                && nqp::eqaddr(comparator($pulled,$max),Order::More)),
-              $max = $pulled
+          nqp::if(
+            # 2-arg &by is already a comparator; use directly
+            nqp::iseq_i(&by.arity, 2),
+            nqp::until(
+              nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
+              nqp::if(
+                (nqp::isconcrete($pulled)
+                  && nqp::eqaddr(by($pulled,$max),Order::More)),
+                $max = $pulled
+              )
+            ),
+            # 1-arg &by is a key function: Schwartzian transform.
+            # Cache the current best's key so it's computed once per element.
+            nqp::stmts(
+              (my $max-key = by($max)),
+              nqp::until(
+                nqp::eqaddr((my $pulled2 := $iter.pull-one),IterationEnd),
+                nqp::if(
+                  nqp::isconcrete($pulled2),
+                  nqp::stmts(
+                    (my $pulled-key = by($pulled2)),
+                    nqp::if(
+                      nqp::eqaddr($pulled-key cmp $max-key,Order::More),
+                      nqp::stmts(
+                        ($max = $pulled2),
+                        ($max-key = $pulled-key)
+                      )
+                    )
+                  )
+                )
+              )
             )
           )
         );
