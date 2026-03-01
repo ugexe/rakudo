@@ -46,6 +46,19 @@ class CompUnit::Repository::Distribution does Distribution {
             my $spec := %data<repo>;  # XXX badly named field?
             my $id   := %data<dist-id>;
 
+            # Ensure the repo chain is initialized and resolve-unknown-repos has
+            # run before calling repository-for-spec. repository-for-name already
+            # initializes $*REPO but repository-for-spec does not. Without this, an
+            # unnamed staging repo that may appear in RAKUDO_PRECOMP_WITH as an Unknown
+            # entry (because e.g. CUR::Staging isn't loaded yet) would never get resolved,
+            # and repository-for-spec would return CompUnit::Repository::Unknown. This
+            # could happen when something uses CUR::Staging to install itself, e.g. zef
+            # installs itself, while also using $?DISTRIBUTION before $*REPO has been
+            # initialized, e.g. `use Zef:ver($?DISTRIBUTION.meta<version>)`.
+            # We can't do this in repository-for-spec itself without causing infinite
+            # recursion, so we'll just do it here.
+            $*REPO;
+
             my $repo := $name
               ?? CompUnit::RepositoryRegistry.repository-for-name($name)
               !! CompUnit::RepositoryRegistry.repository-for-spec($spec);
