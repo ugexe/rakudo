@@ -3,8 +3,14 @@ class CompUnit::Repository::Staging is CompUnit::Repository::Installation {
     has CompUnit::Repository $!parent;
 
     submethod TWEAK(--> Nil) {
-        $!parent = CompUnit::RepositoryRegistry.repository-for-name($!name);
-        CompUnit::RepositoryRegistry.register-name($!name, self);
+        if $!name {
+            $!parent = CompUnit::RepositoryRegistry.repository-for-name($!name);
+            die "'{$!name}' is not a registered repository name" unless $!parent;
+
+            CompUnit::RepositoryRegistry.register-name($!name, self);
+        }
+
+        $!parent //= self.next-repo;
     }
 
     method config() is implementation-detail {
@@ -14,7 +20,7 @@ class CompUnit::Repository::Staging is CompUnit::Repository::Installation {
     method short-id(--> Str:D) { 'staging' }
 
     method path-spec(CompUnit::Repository::Staging:D: --> Str:D) {
-        self.^name ~ '#name(' ~ $!name ~ ')#' ~ self.prefix.absolute
+        self.^name ~ '#name(' ~ ($!name // '') ~ ')#' ~ self.prefix.absolute
     }
 
     method source-file(CompUnit::Repository::Staging:D:
