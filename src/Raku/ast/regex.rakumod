@@ -1318,12 +1318,34 @@ class RakuAST::Regex::Assertion::Named::RegexArg
 
     method IMPL-REGEX-QAST(RakuAST::IMPL::QASTContext $context, %mods) {
         my $body-qast := $!regex-arg.IMPL-REGEX-QAST($context, %mods);
-        $body-qast := self.IMPL-FLIP-QAST($body-qast) if self.name.canonicalize eq 'after';
+        my int $use-scan := 0;
+        if self.name.canonicalize eq 'after' {
+            if self.IMPL-HAS-SUBRULES($body-qast) {
+                $use-scan := 1;
+            }
+            else {
+                $body-qast := self.IMPL-FLIP-QAST($body-qast);
+            }
+        }
         nqp::bindattr(self, RakuAST::Regex::Assertion::Named::RegexArg, '$!body-qast', $body-qast);
         my $qast := self.IMPL-REGEX-QAST-CALL($context);
+        $qast[0][0].value('after_scan') if $use-scan;
         my str $name := self.IMPL-UNIQUE-NAME;
         $qast[0].push(QAST::Var.new( :$name, :scope('lexical') ));
         $qast
+    }
+
+    method IMPL-HAS-SUBRULES($qast) {
+        return 0 unless nqp::istype($qast, QAST::Regex);
+        if $qast.rxtype eq 'subrule' {
+            return 1;
+        }
+        for @($qast) {
+            if self.IMPL-HAS-SUBRULES($_) {
+                return 1;
+            }
+        }
+        return 0;
     }
 
     method IMPL-FLIP-QAST($qast) {

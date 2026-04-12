@@ -11888,9 +11888,19 @@ class Perl6::RegexActions is QRegex::P6Regex::Actions does STDActions {
                     for $<arglist>.ast.list { $qast[0].push(wanted($_, 'assertname')) }
                 }
                 elsif $<nibbler> {
-                    my $nibbled := $name eq 'after'
-                        ?? self.flip_ast($<nibbler>.ast)
-                        !! $<nibbler>.ast;
+                    my $nibbled;
+                    if $name eq 'after' {
+                        if self.has_subrules($<nibbler>.ast) {
+                            $nibbled := $<nibbler>.ast;
+                            $qast[0][0].value('after_scan');
+                        }
+                        else {
+                            $nibbled := self.flip_ast($<nibbler>.ast);
+                        }
+                    }
+                    else {
+                        $nibbled := $<nibbler>.ast;
+                    }
                     my $sub := $/.slang_actions('Regex').qbuildsub($nibbled, :anon(1), :addself(1));
                     $qast[0].push($sub);
                 }
