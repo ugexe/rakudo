@@ -11625,7 +11625,17 @@ class Perl6::RegexActions is QRegex::P6Regex::Actions does STDActions {
     # child individually negated, which the compiler handles correctly.
     my sub mark_zerowidth($qast) {
         $qast.subtype('zerowidth');
-        if $qast.rxtype eq 'alt' || $qast.rxtype eq 'altseq' {
+        my $rxtype := $qast.rxtype;
+        if $rxtype eq 'alt' || $rxtype eq 'altseq' {
+            for $qast.list { mark_zerowidth($_); }
+        }
+        elsif $rxtype eq 'concat' {
+            # Subtraction classes like <[A] - [B]> compile to
+            # concat(conj(B:neg:zero), A). The 'concat' method in the MAST
+            # compiler does not respect 'subtype' on itself, so we push
+            # zerowidth into the children. The inner conj is already
+            # zerowidth; the consuming 'A' child becomes zerowidth too,
+            # turning the whole concat into a zero-width check.
             for $qast.list { mark_zerowidth($_); }
         }
     }
@@ -11642,11 +11652,34 @@ class Perl6::RegexActions is QRegex::P6Regex::Actions does STDActions {
         make $qast;
     }
 
+    # Negate $qast in-place as a zero-width check and return it. Applies De
+    # Morgan when the node is an alt/altseq (negating a disjunction yields a
+    # conjunction of negations). For leaves, just flips the negate flag.
+    my sub negate_zerowidth($qast) {
+        my $rxtype := $qast.rxtype;
+        if $rxtype eq 'alt' || $rxtype eq 'altseq' {
+            my $conj := QAST::Regex.new(:rxtype<conj>, :subtype<zerowidth>);
+            for $qast.list {
+                $_.negate(!$_.negate);
+                mark_zerowidth($_);
+                $conj.push($_);
+            }
+            $conj
+        }
+        else {
+            $qast.negate(!$qast.negate);
+            mark_zerowidth($qast);
+            $qast
+        }
+    }
+
     method assertion:sym<!>($/) {
         my $qast;
         if $<assertion> {
             $qast := $<assertion>.ast;
-            if $qast.rxtype eq 'alt' || $qast.rxtype eq 'altseq' {
+            my $rxtype := $qast.rxtype;
+            if $rxtype eq 'alt' || $rxtype eq 'altseq' {
+                # <![a b]>: De Morgan on the alt
                 my $conj := QAST::Regex.new(
                     :rxtype<conj>, :subtype<zerowidth>, :node($/)
                 );
@@ -11656,6 +11689,35 @@ class Perl6::RegexActions is QRegex::P6Regex::Actions does STDActions {
                     $conj.push($_);
                 }
                 $qast := $conj;
+            }
+            elsif $rxtype eq 'concat' {
+                # <![A] - [B] - [C]>: subtraction chain compiles to nested
+                # concat(conj(subtracted), base). De Morgan:
+                # NOT(A AND NOT B AND NOT C) == NOT A OR B OR C
+                my @alternatives;
+                my $cur := $qast;
+                while $cur.rxtype eq 'concat'
+                    && nqp::elems($cur.list) == 2
+                    && $cur[0].rxtype eq 'conj'
+                    && nqp::elems($cur[0].list) == 1
+                {
+                    # Each subtracted element is stored as !X inside a
+                    # zerowidth conj. Flip the negate so it becomes X for
+                    # our disjunction.
+                    my $sub_elem := $cur[0][0];
+                    $sub_elem.negate(!$sub_elem.negate);
+                    mark_zerowidth($sub_elem);
+                    nqp::push(@alternatives, $sub_elem);
+                    $cur := $cur[1];
+                }
+                # $cur is the base. Negate it with De Morgan if it is an
+                # alt, or just flip its negate if it is a leaf.
+                nqp::push(@alternatives, negate_zerowidth($cur));
+                my $alt := QAST::Regex.new(
+                    |@alternatives, :rxtype<alt>, :node($/)
+                );
+                mark_zerowidth($alt);
+                $qast := $alt;
             }
             else {
                 $qast.negate(!$qast.negate);

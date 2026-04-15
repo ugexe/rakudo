@@ -1416,25 +1416,72 @@ class RakuAST::Regex::Assertion::Lookahead
 
     method IMPL-REGEX-QAST(RakuAST::IMPL::QASTContext $context, %mods) {
         my $qast := $!assertion.IMPL-REGEX-QAST($context, %mods);
+        if $!negated {
+            my $rxtype := $qast.rxtype;
+            if $rxtype eq 'alt' || $rxtype eq 'altseq' {
+                # <![a b]>: De Morgan turns alt into conj with negated leaves.
+                my $conj := QAST::Regex.new(:rxtype<conj>, :subtype<zerowidth>);
+                for @($qast) {
+                    $_.negate(!$_.negate);
+                    self.IMPL-MARK-ZEROWIDTH($_);
+                    $conj.push($_);
+                }
+                $qast := $conj;
+            }
+            elsif $rxtype eq 'concat' {
+                # <![A] - [B] - [C]>: subtraction chain compiles to nested
+                # concat(conj(subtracted), base). De Morgan:
+                # NOT(A AND NOT B AND NOT C) == NOT A OR B OR C
+                my $alternatives := nqp::list();
+                my $cur := $qast;
+                while $cur.rxtype eq 'concat'
+                    && nqp::elems($cur.list) == 2
+                    && $cur[0].rxtype eq 'conj'
+                    && nqp::elems($cur[0].list) == 1
+                {
+                    my $sub_elem := $cur[0][0];
+                    $sub_elem.negate(!$sub_elem.negate);
+                    self.IMPL-MARK-ZEROWIDTH($sub_elem);
+                    nqp::push($alternatives, $sub_elem);
+                    $cur := $cur[1];
+                }
+                nqp::push($alternatives, self.IMPL-NEGATE-ZEROWIDTH($cur));
+                my $alt := QAST::Regex.new(
+                    |$alternatives, :rxtype<alt>
+                );
+                self.IMPL-MARK-ZEROWIDTH($alt);
+                $qast := $alt;
+            }
+            else {
+                self.IMPL-MARK-ZEROWIDTH($qast);
+                $qast.negate(!$qast.negate);
+            }
+        }
+        else {
+            self.IMPL-MARK-ZEROWIDTH($qast);
+        }
+        $qast
+    }
+
+    # Negate $qast in-place as a zero-width check and return it. Applies
+    # De Morgan when the node is an alt/altseq (negating a disjunction
+    # yields a conjunction of negations). For leaves, flips negate.
+    method IMPL-NEGATE-ZEROWIDTH($qast) {
         my $rxtype := $qast.rxtype;
-        if $!negated && ($rxtype eq 'alt' || $rxtype eq 'altseq') {
-            # De Morgan: <![a b]> becomes conj(!a, !b) at zero-width,
-            # because the MAST compiler ignores negate/subtype on alt.
+        if $rxtype eq 'alt' || $rxtype eq 'altseq' {
             my $conj := QAST::Regex.new(:rxtype<conj>, :subtype<zerowidth>);
             for @($qast) {
                 $_.negate(!$_.negate);
                 self.IMPL-MARK-ZEROWIDTH($_);
                 $conj.push($_);
             }
-            $qast := $conj;
+            $conj
         }
         else {
+            $qast.negate(!$qast.negate);
             self.IMPL-MARK-ZEROWIDTH($qast);
-            if $!negated {
-                $qast.negate(!$qast.negate);
-            }
+            $qast
         }
-        $qast
     }
 
     # Mix-and-match character classes like <?[\s a]> compile to an 'alt'
@@ -1444,7 +1491,17 @@ class RakuAST::Regex::Assertion::Lookahead
     # zerowidth subtype.
     method IMPL-MARK-ZEROWIDTH($qast) {
         $qast.subtype('zerowidth');
-        if $qast.rxtype eq 'alt' || $qast.rxtype eq 'altseq' {
+        my $rxtype := $qast.rxtype;
+        if $rxtype eq 'alt' || $rxtype eq 'altseq' {
+            for @($qast) { self.IMPL-MARK-ZEROWIDTH($_) }
+        }
+        elsif $rxtype eq 'concat' {
+            # Subtraction classes like <[A] - [B]> compile to
+            # concat(conj(B:neg:zero), A). The 'concat' method in the MAST
+            # compiler does not respect 'subtype' on itself, so we push
+            # zerowidth into the children. The inner conj is already
+            # zerowidth; the consuming 'A' child becomes zerowidth too,
+            # turning the whole concat into a zero-width check.
             for @($qast) { self.IMPL-MARK-ZEROWIDTH($_) }
         }
     }
