@@ -1416,11 +1416,37 @@ class RakuAST::Regex::Assertion::Lookahead
 
     method IMPL-REGEX-QAST(RakuAST::IMPL::QASTContext $context, %mods) {
         my $qast := $!assertion.IMPL-REGEX-QAST($context, %mods);
-        $qast.subtype('zerowidth');
-        if $!negated {
-            $qast.negate(!$qast.negate);
+        my $rxtype := $qast.rxtype;
+        if $!negated && ($rxtype eq 'alt' || $rxtype eq 'altseq') {
+            # De Morgan: <![a b]> becomes conj(!a, !b) at zero-width,
+            # because the MAST compiler ignores negate/subtype on alt.
+            my $conj := QAST::Regex.new(:rxtype<conj>, :subtype<zerowidth>);
+            for @($qast) {
+                $_.negate(!$_.negate);
+                self.IMPL-MARK-ZEROWIDTH($_);
+                $conj.push($_);
+            }
+            $qast := $conj;
+        }
+        else {
+            self.IMPL-MARK-ZEROWIDTH($qast);
+            if $!negated {
+                $qast.negate(!$qast.negate);
+            }
         }
         $qast
+    }
+
+    # Mix-and-match character classes like <?[\s a]> compile to an 'alt'
+    # QAST::Regex wrapping a cclass and an enumcharlist. The MAST compiler's
+    # alt/altseq does not propagate zerowidth to children, so each leaf would
+    # still advance pos. Walk through 'alt' wrappers so every leaf sees the
+    # zerowidth subtype.
+    method IMPL-MARK-ZEROWIDTH($qast) {
+        $qast.subtype('zerowidth');
+        if $qast.rxtype eq 'alt' || $qast.rxtype eq 'altseq' {
+            for @($qast) { self.IMPL-MARK-ZEROWIDTH($_) }
+        }
     }
 
     method visit-children(Code $visitor) {

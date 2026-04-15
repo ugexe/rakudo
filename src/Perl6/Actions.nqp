@@ -11616,6 +11616,58 @@ class Perl6::QActions is HLL::Actions does STDActions {
 
 class Perl6::RegexActions is QRegex::P6Regex::Actions does STDActions {
 
+    # The MAST compiler's alt/altseq method ignores both 'subtype' and
+    # 'negate' flags on the alt node itself -- only each child's own flags
+    # are honored. For positive lookarounds like <?[\s a]>, propagating the
+    # 'zerowidth' subtype down to the leaves is enough. For negative
+    # lookarounds like <![\s a]>, we additionally apply De Morgan's law --
+    # !(a OR b) == !a AND !b -- to rewrite the alt into a 'conj' with each
+    # child individually negated, which the compiler handles correctly.
+    my sub mark_zerowidth($qast) {
+        $qast.subtype('zerowidth');
+        if $qast.rxtype eq 'alt' || $qast.rxtype eq 'altseq' {
+            for $qast.list { mark_zerowidth($_); }
+        }
+    }
+
+    method assertion:sym<?>($/) {
+        my $qast;
+        if $<assertion> {
+            $qast := $<assertion>.ast;
+            mark_zerowidth($qast);
+        }
+        else {
+            $qast := QAST::Regex.new( :rxtype<anchor>, :subtype<pass>, :node($/) );
+        }
+        make $qast;
+    }
+
+    method assertion:sym<!>($/) {
+        my $qast;
+        if $<assertion> {
+            $qast := $<assertion>.ast;
+            if $qast.rxtype eq 'alt' || $qast.rxtype eq 'altseq' {
+                my $conj := QAST::Regex.new(
+                    :rxtype<conj>, :subtype<zerowidth>, :node($/)
+                );
+                for $qast.list {
+                    $_.negate(!$_.negate);
+                    mark_zerowidth($_);
+                    $conj.push($_);
+                }
+                $qast := $conj;
+            }
+            else {
+                $qast.negate(!$qast.negate);
+                mark_zerowidth($qast);
+            }
+        }
+        else {
+            $qast := QAST::Regex.new( :rxtype<anchor>, :subtype<fail>, :node($/) );
+        }
+        make $qast;
+    }
+
     method metachar:sym<:my>($/) {
         my $past := $<statement>.ast;
         make QAST::Regex.new( $past, :rxtype('qastnode'), :subtype('declarative') );
