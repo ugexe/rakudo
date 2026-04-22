@@ -256,6 +256,13 @@ class RakuAST::CompUnit
     # does not declare its own GLOBAL and so forth.
     method is-eval() { $!is-eval ?? True !! False }
 
+    # The setting context the CompUnit's resolver knows about, if any.
+    method setting() {
+        nqp::isconcrete($!resolver)
+          ?? nqp::getattr($!resolver, RakuAST::Resolver, '$!setting')
+          !! Mu
+    }
+
     method attach-target-names() {
         self.IMPL-WRAP-LIST(['compunit'])
     }
@@ -514,7 +521,14 @@ class RakuAST::CompUnit
         self.add-phasers-to-code-object($!mainline.meta-object);
         self.add-phasers-handling-code($context, $top-level);
 
-        if $context.is-nested {
+        # Run the fixup for nested CHECK/precomp (non-eval) compunits, which
+        # need outer lexicals statically baked, and for string-form EVAL
+        # compiled during a BEGIN block (marked by $*INSIDE-EVAL): those need
+        # the same static baking because the captured outer-context chain is
+        # a transient BEGIN-time frame that is gone by runtime. AST-form EVAL
+        # is excluded because its resolver can't statically resolve setting
+        # symbols at BEGIN time (the #6134 bug).
+        if $context.is-nested && (!$!is-eval || $*INSIDE-EVAL) {
             $!mainline.IMPL-FIXUP-DYNAMICALLY-COMPILED-BLOCK($!resolver, $context, $top-level);
         }
 
