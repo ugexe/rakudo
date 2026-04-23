@@ -241,6 +241,29 @@ class RakuAST::Code
             @compstuff[3] := $fixups;
         }
 
+        # For string-form EVAL compiled during a BEGIN block (marked by
+        # $*INSIDE-EVAL), IMPL-STUB-CODE's self-replacing $!do stub never
+        # gets replaced: nested compunits drop post_deserialize to avoid
+        # polluting the outer compile's fixup list, so the usual bindattr-
+        # $!do fixup (above) is skipped. Drop an equivalent fixup into a
+        # per-compile bucket so compunit.rakumod can hand it to the inner
+        # QAST::CompUnit's :post_deserialize, scoped to just this compunit.
+        # Without this, invoking a Sub returned from BEGIN-time string EVAL
+        # infinite-loops in the stub. Gated on $*INSIDE-EVAL so AST-form
+        # EVAL (whose nodes may retain $!qast-block/$!do state from an
+        # earlier parse) isn't disturbed.
+        if $context.is-nested && ($*INSIDE-EVAL // 0) {
+            $context.add-nested-fixup(
+                QAST::Op.new(
+                    :op('bindattr'),
+                    QAST::WVal.new( :value($code-obj) ),
+                    QAST::WVal.new( :value(Code) ),
+                    QAST::SVal.new( :value('$!do') ),
+                    QAST::BVal.new( :value($block) )
+                )
+            );
+        }
+
         @compstuff[0] := $block;
 
         $context.add-code-ref(nqp::getattr($code-obj, Code, '$!do'), $block);

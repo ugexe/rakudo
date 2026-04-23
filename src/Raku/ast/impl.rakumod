@@ -27,6 +27,14 @@ class RakuAST::IMPL::QASTContext {
     has int $.is-nested;
     has Mu $.language-revision; # Same type as in CORE-SETTING-REV
 
+    # Per-compile fixup bucket for nested compunits. The usual fixup flow
+    # routes through $!post-deserialize, which is shared across inner/outer
+    # compiles, so nested compunits have to bypass it to avoid polluting
+    # the outer compile's list. Instead they drop their Code.$!do fixups
+    # here and compunit.rakumod hands this to the inner QAST::CompUnit's
+    # :post_deserialize so the fixups run for that compunit only.
+    has Mu $.nested-fixups;
+
     method new(Mu :$sc!, int :$precompilation-mode, :$setting, :$language-revision) {
         my $obj := nqp::create(self);
         nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!sc', $sc);
@@ -40,6 +48,7 @@ class RakuAST::IMPL::QASTContext {
         nqp::bindattr_i($obj, RakuAST::IMPL::QASTContext, '$!is-nested', 0);
         nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!setting', $setting);
         nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!language-revision', $language-revision);
+        nqp::bindattr($obj, RakuAST::IMPL::QASTContext, '$!nested-fixups', QAST::Stmts.new);
         $obj
     }
 
@@ -47,7 +56,14 @@ class RakuAST::IMPL::QASTContext {
         my $context := nqp::clone(self);
         nqp::bindattr($context, RakuAST::IMPL::QASTContext, '$!cleanup-tasks', []);
         nqp::bindattr_i($context, RakuAST::IMPL::QASTContext, '$!is-nested', 1);
+        # Fresh fixup container so inner compile's fixups don't bleed into
+        # the outer compile.
+        nqp::bindattr($context, RakuAST::IMPL::QASTContext, '$!nested-fixups', QAST::Stmts.new);
         $context
+    }
+
+    method add-nested-fixup(Mu $qast) {
+        $!nested-fixups.push($qast);
     }
 
     # Get the handle of the serialization context.

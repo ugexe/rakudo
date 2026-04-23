@@ -2,7 +2,7 @@ use Test;
 use lib <t/packages/Test-Helpers>;
 use Test::Helpers;
 
-plan 109;
+plan 111;
 
 # t/spec/S03-sequence/misc.t
 # https://github.com/rakudo/rakudo/issues/5520
@@ -757,6 +757,23 @@ subtest 'use of &?ROUTINE and &?BLOCK' => {
     my $greeter = BEGIN Q|sub { "hi " ~ "there" }|.AST.EVAL;
     is $greeter(), "hi there",
       'BEGIN-time EVAL of a RakuAST sub can resolve setting routines and run';
+}
+
+# Sub returned from BEGIN-time string EVAL used to infinite-loop on invoke
+# because IMPL-STUB-CODE's self-replacing $!do stub was never replaced for
+# the nested compunit.
+{
+    use MONKEY-SEE-NO-EVAL;
+    my $s = BEGIN EVAL 'sub { 42 }';
+    is $s(), 42,
+      'invoking a Sub returned from BEGIN-time string EVAL works';
+}
+
+{
+    use MONKEY-SEE-NO-EVAL;
+    my $s = BEGIN EVAL 'sub { 1 + 2 }';
+    is $s(), 3,
+      'BEGIN-time string-EVAL Sub with setting operator runs';
 }
 
 # vim: expandtab shiftwidth=4
