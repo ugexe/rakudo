@@ -105,10 +105,29 @@ class RakuAST::ColonPair
 
     method properties() { OperatorProperties.postfix(':') }
 
+    method simple-compile-time-quote-value() { Nil }
+
+    # Failure results are returned, not rethrown; callers decide, see
+    # `IMPL-EVAL-COLONPAIR-VALUE-OR-RETHROW`. Value is memoized on the
+    # node so side effects fire at most once.
+    method IMPL-EVAL-COLONPAIR-VALUE(RakuAST::Resolver $resolver,
+                                     RakuAST::IMPL::QASTContext $context) {
+        self.simple-compile-time-quote-value
+    }
+
+    # `$Failure` is the caller's already-resolved Failure type, or
+    # `nqp::null` during CORE setting bootstrap.
+    method IMPL-EVAL-COLONPAIR-VALUE-OR-RETHROW(RakuAST::Resolver $resolver,
+                                                RakuAST::IMPL::QASTContext $context,
+                                                Mu $Failure) {
+        my $value := self.IMPL-EVAL-COLONPAIR-VALUE($resolver, $context);
+        $value.exception.throw
+            if !nqp::isnull($Failure) && nqp::istype($value, $Failure);
+        $value
+    }
+
     method canonicalize() {
         my $value := self.simple-compile-time-quote-value;
-        $value := self.value.IMPL-INTERPRET(RakuAST::IMPL::InterpContext.new)
-            if !$value && self.value.IMPL-CAN-INTERPRET;
         $!key ~ (
             $value
                 ?? self.IMPL-QUOTE-VALUE($value)
@@ -317,6 +336,8 @@ class RakuAST::ColonPair::Value
   is RakuAST::QuotePair
 {
     has RakuAST::Expression $.value;
+    has Mu  $!cached-value;
+    has int $!has-cached-value;
 
     method new(Str :$key!, RakuAST::Expression :$value!) {
         my $obj := nqp::create(self);
@@ -329,14 +350,51 @@ class RakuAST::ColonPair::Value
         $visitor($!value);
     }
 
+    # Never calls IMPL-INTERPRET, so callers that just need to introspect
+    # (canonicalize, adverb scanners) don't fire side effects.
     method simple-compile-time-quote-value() {
-        # TODO various cases we can handle here
+        return $!cached-value if $!has-cached-value;
         if nqp::istype(self.value, RakuAST::QuotedString) {
-            self.value.literal-value
+            my $v := self.value.literal-value;
+            nqp::bindattr(self, RakuAST::ColonPair::Value, '$!cached-value', $v);
+            nqp::bindattr_i(self, RakuAST::ColonPair::Value, '$!has-cached-value', 1);
+            $v
         }
         else {
             Nil
         }
+    }
+
+    # `IMPL-BEGIN-TIME-EVALUATE`'s exception attribution depends on
+    # `self.origin`, which is unset on the BeginTime type object we
+    # dispatch through, so the CATCH wrapper re-attaches the colonpair's
+    # source location to any rethrown exception.
+    method IMPL-EVAL-COLONPAIR-VALUE(RakuAST::Resolver $resolver,
+                                     RakuAST::IMPL::QASTContext $context) {
+        return $!cached-value if $!has-cached-value;
+        my $value := self.simple-compile-time-quote-value;
+        return $value if $!has-cached-value;
+        if $!value.IMPL-CAN-INTERPRET {
+            $value := $!value.IMPL-INTERPRET(RakuAST::IMPL::InterpContext.new);
+            nqp::bindattr(self, RakuAST::ColonPair::Value, '$!cached-value', $value);
+            nqp::bindattr_i(self, RakuAST::ColonPair::Value, '$!has-cached-value', 1);
+            return $value;
+        }
+        {
+            CATCH {
+                my $ex := $resolver.convert-begin-time-exception($_);
+                if nqp::can($ex, 'SET_FILE_LINE') && my $origin := self.origin {
+                    my $origin-match := $origin.as-match;
+                    $ex.SET_FILE_LINE($origin-match.file, $origin-match.line);
+                }
+                $ex.rethrow;
+            }
+            $value := RakuAST::BeginTime.IMPL-BEGIN-TIME-EVALUATE(
+                $!value, $resolver, $context);
+        }
+        nqp::bindattr(self, RakuAST::ColonPair::Value, '$!cached-value', $value);
+        nqp::bindattr_i(self, RakuAST::ColonPair::Value, '$!has-cached-value', 1);
+        $value
     }
 
     method has-compile-time-value() {
