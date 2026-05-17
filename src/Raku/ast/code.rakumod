@@ -1258,6 +1258,15 @@ class RakuAST::Block
     # 3 = required implicit topic populated from exception
     has int $!implicit-topic-mode;
 
+    # Set to 1 when this block is the implicit body of an
+    # if/unless/with/without/elsif/orwith/while/until/loop/repeat construct,
+    # i.e. a body the user wrote but never gave a name to. The pre-6.e
+    # `&?BLOCK` lookup walker (RakuAST::Var::Compiler::Block, with parallel
+    # gating in Perl6::Actions for legacy) walks past marked blocks and
+    # returns the enclosing named block instead (#2362). Under 6.e+ the
+    # walker ignores the flag; nothing else currently reads it.
+    has int $!implicit-body-block;
+
     # Should this block declare a fresh implicit `$/`?
     has int $!fresh-match;
 
@@ -1316,6 +1325,15 @@ class RakuAST::Block
     method implicit-topic() { $!implicit-topic-mode == 1 ?? Bool !! $!implicit-topic-mode > 1 }
     method required-topic() { $!implicit-topic-mode > 1 || Bool }
     method exception()      { $!implicit-topic-mode > 2 || Bool }
+
+    method mark-implicit-body-block() {
+        nqp::bindattr_i(self, RakuAST::Block, '$!implicit-body-block', 1);
+        Nil
+    }
+
+    method is-implicit-body-block() {
+        $!implicit-body-block ?? True !! False
+    }
 
     method set-fresh-variables(Bool :$match, Bool :$exception) {
         nqp::bindattr_i(self, RakuAST::Block, '$!fresh-match', $match ?? 1 !! 0);
@@ -1746,7 +1764,7 @@ class RakuAST::Routine
     method PERFORM-PARSE(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         my $package := $resolver.find-attach-target('package');
         nqp::bindattr(self, RakuAST::Routine, '$!package', $package // $resolver.global-package);
-        my $block := $resolver.find-attach-target('block', :skip-first);
+        my $block := $resolver.find-attach-target('block', :skip-targets(1));
         nqp::bindattr(self, RakuAST::Routine, '$!outer', $block);
         nqp::bindattr(self, RakuAST::Code, '$!resolver', $resolver.clone);
     }

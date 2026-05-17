@@ -3249,8 +3249,24 @@ class Perl6::Actions is HLL::Actions does STDActions {
             }
             my $Routine := $world.find_single_symbol_in_setting('Routine');
             if $name eq '&?BLOCK' || nqp::istype($*CODE_OBJECT, $Routine) {
-                # Just need current code object.
-                $past := QAST::Op.new( :op('getcodeobj'), QAST::Op.new( :op('curcode') ) );
+                # 6.e and later: emit a static reference to the
+                # immediately-enclosing Block's code object. Under
+                # legacy code-gen if/while/loop/etc bodies are compiled
+                # in `immediate` mode (inlined into the surrounding
+                # frame), so the historical `getcodeobj(curcode())`
+                # returns the outer routine instead of the if-body
+                # itself (see #2362). The Block object for the body
+                # exists at compile time regardless of inline mode, so
+                # binding $*CODE_OBJECT directly gives the spec-correct
+                # body reference without changing code-gen.
+                if nqp::getcomp('Raku').language_revision >= 3 && $name eq '&?BLOCK' {
+                    $past := QAST::WVal.new( :value($*CODE_OBJECT) );
+                }
+                else {
+                    # Pre-6.e: keep the historical (legacy-buggy)
+                    # behavior so existing code is unaffected.
+                    $past := QAST::Op.new( :op('getcodeobj'), QAST::Op.new( :op('curcode') ) );
+                }
             }
             else {
                 my int $scopes := 0;

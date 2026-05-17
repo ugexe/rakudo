@@ -512,9 +512,49 @@ class RakuAST::Var::Compiler::Line
 
 class RakuAST::Var::Compiler::Block
   is RakuAST::Var::Compiler
+  is RakuAST::CheckTime
 {
+    has Mu $!resolved-target;
+
+    method PERFORM-CHECK(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
+        # 6.e+: leave $!resolved-target null; IMPL-EXPR-QAST will emit
+        # the immediate `curcode` lookup. Pre-6.e: walk the enclosing
+        # block stack, skipping bodies marked is-implicit-body-block
+        # (set on if/elsif/else/unless/while/until/loop/repeat/when
+        # bodies; with/orwith/without bodies are NOT marked because the
+        # legacy frontend never skipped them either, and their body has
+        # an implicit topic which makes returning it the spec-correct
+        # answer on both revisions). Remember the first non-skip block
+        # so we can emit a static reference to its code object. This
+        # matches the historical legacy behavior for &?BLOCK (#2362)
+        # where if/while/etc bodies were resolved past, returning the
+        # enclosing routine or block.
+        return Nil if nqp::getcomp('Raku').language_revision >= 3;
+
+        my int $depth := 0;
+        my $target;
+        while nqp::isconcrete(my $block := $resolver.find-attach-target('block', :skip-targets($depth))) {
+            unless nqp::istype($block, RakuAST::Block)
+                && $block.is-implicit-body-block
+            {
+                $target := $block;
+                last;
+            }
+            $depth++;
+        }
+        nqp::bindattr(self, RakuAST::Var::Compiler::Block,
+          '$!resolved-target', $target);
+    }
+
     method IMPL-EXPR-QAST(RakuAST::IMPL::QASTContext $context) {
-        QAST::Op.new( :op('getcodeobj'), QAST::Op.new( :op('curcode') ) )
+        if nqp::isconcrete($!resolved-target) {
+            my $code := $!resolved-target.meta-object;
+            $context.ensure-sc($code);
+            QAST::WVal.new( :value($code) )
+        }
+        else {
+            QAST::Op.new( :op('getcodeobj'), QAST::Op.new( :op('curcode') ) )
+        }
     }
 }
 

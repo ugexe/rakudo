@@ -112,10 +112,10 @@ class RakuAST::Resolver {
     # Find the current (most recently pushed) attachment target with the
     # specified name, or return Nil if there is no target by the given name,
     # or no targets left for the given name.
-    method find-attach-target(str $name, Bool :$skip-first) {
+    method find-attach-target(str $name, Int :$skip-targets) {
         my @stack := $!attach-targets{$name};
-        nqp::isconcrete(@stack) && nqp::elems(@stack) > +$skip-first
-          ?? @stack[nqp::elems(@stack) - (1 + $skip-first)]
+        nqp::isconcrete(@stack) && nqp::elems(@stack) > +$skip-targets
+          ?? @stack[nqp::elems(@stack) - (1 + $skip-targets)]
           !! Nil
     }
 

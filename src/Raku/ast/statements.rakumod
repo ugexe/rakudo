@@ -839,6 +839,7 @@ class RakuAST::Statement::IfWith
         }
         else {
             $!then.set-implicit-topic(False, :local);
+            $!then.mark-implicit-body-block;
         }
         for $!elsifs {
             $_.apply-implicit-block-semantics();
@@ -850,6 +851,7 @@ class RakuAST::Statement::IfWith
             }
             else {
                 $!else.set-implicit-topic(False, :local);
+                $!else.mark-implicit-body-block;
             }
         }
     }
@@ -955,6 +957,7 @@ class RakuAST::Statement::Elsif {
 
     method apply-implicit-block-semantics() {
         $!then.set-implicit-topic(False, :local);
+        $!then.mark-implicit-body-block;
     }
 
     method IMPL-QAST-TYPE() { 'if' }
@@ -993,6 +996,7 @@ class RakuAST::Statement::Unless
 
     method apply-implicit-block-semantics() {
         $!body.set-implicit-topic(False, :local);
+        $!body.mark-implicit-body-block;
     }
 
     method PRODUCE-IMPLICIT-LOOKUPS() {
@@ -1127,6 +1131,7 @@ class RakuAST::Statement::Loop
 
     method apply-implicit-block-semantics() {
         $!body.set-implicit-topic(False, :local);
+        $!body.mark-implicit-body-block;
     }
 
     method mark-block-statement() {
@@ -1456,6 +1461,7 @@ class RakuAST::Statement::When
 
     method apply-implicit-block-semantics() {
         $!body.set-implicit-topic(False);
+        $!body.mark-implicit-body-block;
     }
 
     method propagate-sink(Bool $is-sunk) {

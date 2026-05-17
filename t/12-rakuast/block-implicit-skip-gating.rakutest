@@ -1,0 +1,301 @@
+use Test;
+
+plan 14;
+
+# Issue #2362: pre-6.e `&?BLOCK` inside the body of certain control
+# constructs returns the *enclosing* named block instead of the body
+# itself (a quirk of legacy immediate-mode codegen). RakuAST originally
+# fixed this; the fix is gated on language revision so pre-6.e code
+# keeps the legacy behavior and 6.e+ gets the spec-correct one.
+#
+# Each subtest below runs a focused script under both revisions and
+# verifies the per-revision behavior. Behavior is checked by identity:
+# capture `&?BLOCK` in an enclosing named block (sub or given), then
+# look it up again inside the construct's body and compare. This
+# avoids probing arity/signature, which can vary between frontends
+# for unrelated reasons.
+
+sub run-script(Str $revision, Str $body --> Str) {
+    my $proc = run :out, :err, $*EXECUTABLE.absolute, '-e', "$revision\n$body";
+    my $out  = $proc.out.slurp(:close);
+    $proc.err.slurp(:close);  # drain; STDERR is asserted in block-implicit-skip-worry
+    $out
+}
+
+# ---- skip-marked constructs ------------------------------------------------
+# Pre-6.e: &?BLOCK skips the body and returns the enclosing sub.
+# 6.e: &?BLOCK returns the immediate body.
+
+subtest 'if-body' => {
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            if True {
+                say &?BLOCK === $sub
+                    ?? "returned enclosing sub"
+                    !! "returned if-body";
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned enclosing sub\n",
+       'pre-6.e: walker skips if-body, returns enclosing sub';
+    is run-script('use v6.e.PREVIEW;', $script), "returned if-body\n",
+       '6.e: returns the immediate if-body';
+}
+
+subtest 'elsif-body' => {
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            if False { } elsif True {
+                say &?BLOCK === $sub
+                    ?? "returned enclosing sub"
+                    !! "returned elsif-body";
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned enclosing sub\n",
+       'pre-6.e: walker skips elsif-body, returns enclosing sub';
+    is run-script('use v6.e.PREVIEW;', $script), "returned elsif-body\n",
+       '6.e: returns the immediate elsif-body';
+}
+
+subtest 'else-body' => {
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            if False { } else {
+                say &?BLOCK === $sub
+                    ?? "returned enclosing sub"
+                    !! "returned else-body";
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned enclosing sub\n",
+       'pre-6.e: walker skips else-body, returns enclosing sub';
+    is run-script('use v6.e.PREVIEW;', $script), "returned else-body\n",
+       '6.e: returns the immediate else-body';
+}
+
+subtest 'unless-body' => {
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            unless False {
+                say &?BLOCK === $sub
+                    ?? "returned enclosing sub"
+                    !! "returned unless-body";
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned enclosing sub\n",
+       'pre-6.e: walker skips unless-body, returns enclosing sub';
+    is run-script('use v6.e.PREVIEW;', $script), "returned unless-body\n",
+       '6.e: returns the immediate unless-body';
+}
+
+subtest 'while-body' => {
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            while True {
+                say &?BLOCK === $sub
+                    ?? "returned enclosing sub"
+                    !! "returned while-body";
+                last;
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned enclosing sub\n",
+       'pre-6.e: walker skips while-body, returns enclosing sub';
+    is run-script('use v6.e.PREVIEW;', $script), "returned while-body\n",
+       '6.e: returns the immediate while-body';
+}
+
+subtest 'until-body' => {
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            until False {
+                say &?BLOCK === $sub
+                    ?? "returned enclosing sub"
+                    !! "returned until-body";
+                last;
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned enclosing sub\n",
+       'pre-6.e: walker skips until-body, returns enclosing sub';
+    is run-script('use v6.e.PREVIEW;', $script), "returned until-body\n",
+       '6.e: returns the immediate until-body';
+}
+
+subtest 'loop-body' => {
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            loop {
+                say &?BLOCK === $sub
+                    ?? "returned enclosing sub"
+                    !! "returned loop-body";
+                last;
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned enclosing sub\n",
+       'pre-6.e: walker skips loop-body, returns enclosing sub';
+    is run-script('use v6.e.PREVIEW;', $script), "returned loop-body\n",
+       '6.e: returns the immediate loop-body';
+}
+
+subtest 'repeat-body' => {
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            repeat {
+                say &?BLOCK === $sub
+                    ?? "returned enclosing sub"
+                    !! "returned repeat-body";
+            } until True;
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned enclosing sub\n",
+       'pre-6.e: walker skips repeat-body, returns enclosing sub';
+    is run-script('use v6.e.PREVIEW;', $script), "returned repeat-body\n",
+       '6.e: returns the immediate repeat-body';
+}
+
+subtest 'when-body inside given' => {
+    # `when` sits inside `given`; its body's enclosing named block is
+    # the given-body, not the surrounding sub. Capture the given-body
+    # explicitly as the boundary for comparison.
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            given 1 {
+                my $given-body = &?BLOCK;
+                when 1 {
+                    say &?BLOCK === $given-body
+                        ?? "returned enclosing given-body"
+                        !! "returned when-body";
+                }
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned enclosing given-body\n",
+       'pre-6.e: walker skips when-body, returns enclosing given-body';
+    is run-script('use v6.e.PREVIEW;', $script), "returned when-body\n",
+       '6.e: returns the immediate when-body';
+}
+
+subtest 'nested if-in-if walks past both bodies' => {
+    # Both if-bodies are skip-marked; under pre-6.e the walker walks
+    # past both and lands on the enclosing sub. Under 6.e the inner
+    # if-body is returned.
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            if True {
+                if True {
+                    say &?BLOCK === $sub
+                        ?? "returned enclosing sub"
+                        !! "returned inner if-body";
+                }
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned enclosing sub\n",
+       'pre-6.e: walker walks past both if-bodies, returns enclosing sub';
+    is run-script('use v6.e.PREVIEW;', $script), "returned inner if-body\n",
+       '6.e: returns the innermost if-body';
+}
+
+# ---- negative controls -----------------------------------------------------
+# Bodies that are NOT skip-marked. They return their immediate body on
+# both revisions; the legacy frontend never skipped them either (their
+# body has a topic and returning it is the spec-correct answer). If a
+# future refactor accidentally marks one of these, its pre-6.e
+# assertion flips.
+
+subtest 'with-body is not skip-marked' => {
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            with 1 {
+                say &?BLOCK === $sub
+                    ?? "returned enclosing sub"
+                    !! "returned with-body";
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned with-body\n",
+       'pre-6.e: with-body is not skip-marked; returns its body';
+    is run-script('use v6.e.PREVIEW;', $script), "returned with-body\n",
+       '6.e: returns its body (consistent with pre-6.e)';
+}
+
+subtest 'orwith-body is not skip-marked' => {
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            with Nil { } orwith 1 {
+                say &?BLOCK === $sub
+                    ?? "returned enclosing sub"
+                    !! "returned orwith-body";
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned orwith-body\n",
+       'pre-6.e: orwith-body is not skip-marked; returns its body';
+    is run-script('use v6.e.PREVIEW;', $script), "returned orwith-body\n",
+       '6.e: returns its body (consistent with pre-6.e)';
+}
+
+subtest 'without-body is not skip-marked' => {
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            without Nil {
+                say &?BLOCK === $sub
+                    ?? "returned enclosing sub"
+                    !! "returned without-body";
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned without-body\n",
+       'pre-6.e: without-body is not skip-marked; returns its body';
+    is run-script('use v6.e.PREVIEW;', $script), "returned without-body\n",
+       '6.e: returns its body (consistent with pre-6.e)';
+}
+
+subtest 'do-body is not a control construct' => {
+    my $script = q:to/SCRIPT/;
+        sub demo {
+            my $sub = &?BLOCK;
+            do {
+                say &?BLOCK === $sub
+                    ?? "returned enclosing sub"
+                    !! "returned do-body";
+            }
+        }
+        demo();
+        SCRIPT
+    is run-script('use v6.d;',         $script), "returned do-body\n",
+       'pre-6.e: do-body is not skip-marked; returns its body';
+    is run-script('use v6.e.PREVIEW;', $script), "returned do-body\n",
+       '6.e: returns its body (consistent with pre-6.e)';
+}
+
+# vim: expandtab shiftwidth=4
