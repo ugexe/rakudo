@@ -544,6 +544,15 @@ class RakuAST::Var::Compiler::Block
         }
         nqp::bindattr(self, RakuAST::Var::Compiler::Block,
           '$!resolved-target', $target);
+
+        # Warn only when we skipped at least one body AND found a
+        # non-skip block to walk to. If $target is null we fall through
+        # to the `getcodeobj(curcode())` emit below, which is also what
+        # 6.e+ emits, so no behavior diverges and no worry is needed.
+        if $depth > 0 && nqp::isconcrete($target) {
+            self.add-worry:
+              $resolver.build-exception: 'X::Block::LookupSkippedImplicitBody';
+        }
     }
 
     method IMPL-EXPR-QAST(RakuAST::IMPL::QASTContext $context) {

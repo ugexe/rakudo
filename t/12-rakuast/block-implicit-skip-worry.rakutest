@@ -1,0 +1,135 @@
+use Test;
+
+plan 16;
+
+# Worry fired by the pre-6.e &?BLOCK gate when the lookup actually
+# returns a different block than 6.e+ would. Lets users porting forward
+# from `use v6.d;` to `use v6.e.PREVIEW;` see the divergent sites at
+# compile time. Mirrors the precedent set by X::Package::SameNameAsEnclosing
+# for the nested-package-collision gating.
+#
+# RakuAST-specific (the legacy frontend doesn't have a clean compile-
+# time hook to detect "we're inside an inlined if-body" at the &?BLOCK
+# lookup site), so each spawned subprocess forces RAKUDO_RAKUAST=1.
+
+sub run-rakuast(Str $src --> Str) {
+    my %env = %*ENV;
+    %env<RAKUDO_RAKUAST> = 1;
+    my $proc = run :env(%env), :out, :err, $*EXECUTABLE.absolute, '-e', $src;
+    $proc.out.slurp(:close);   # drain
+    $proc.err.slurp(:close)    # what we test on
+}
+
+my $worry-regex = /'enclosing block'/;
+
+# ---- positive cases: worry must fire ---------------------------------------
+# For each skip-marked construct, the walker returns a different block
+# than 6.e would, so the worry text appears on STDERR.
+
+subtest 'if-body inside a sub fires the worry' => {
+    like run-rakuast(q{use v6.d; sub demo { if True { &?BLOCK } }; demo()}),
+         $worry-regex,
+         'STDERR contains the worry text';
+}
+
+subtest 'elsif-body fires the worry' => {
+    like run-rakuast(q{use v6.d; sub demo { if False { } elsif True { &?BLOCK } }; demo()}),
+         $worry-regex,
+         'STDERR contains the worry text';
+}
+
+subtest 'else-body fires the worry' => {
+    like run-rakuast(q{use v6.d; sub demo { if False { } else { &?BLOCK } }; demo()}),
+         $worry-regex,
+         'STDERR contains the worry text';
+}
+
+subtest 'unless-body fires the worry' => {
+    like run-rakuast(q{use v6.d; sub demo { unless False { &?BLOCK } }; demo()}),
+         $worry-regex,
+         'STDERR contains the worry text';
+}
+
+subtest 'while-body fires the worry' => {
+    like run-rakuast(q{use v6.d; sub demo { while True { &?BLOCK; last } }; demo()}),
+         $worry-regex,
+         'STDERR contains the worry text';
+}
+
+subtest 'until-body fires the worry' => {
+    like run-rakuast(q{use v6.d; sub demo { until False { &?BLOCK; last } }; demo()}),
+         $worry-regex,
+         'STDERR contains the worry text';
+}
+
+subtest 'loop-body fires the worry' => {
+    like run-rakuast(q{use v6.d; sub demo { loop { &?BLOCK; last } }; demo()}),
+         $worry-regex,
+         'STDERR contains the worry text';
+}
+
+subtest 'repeat-body fires the worry' => {
+    like run-rakuast(q{use v6.d; sub demo { repeat { &?BLOCK } until True }; demo()}),
+         $worry-regex,
+         'STDERR contains the worry text';
+}
+
+subtest 'when-body fires the worry' => {
+    like run-rakuast(q{use v6.d; sub demo { given 1 { when 1 { &?BLOCK } } }; demo()}),
+         $worry-regex,
+         'STDERR contains the worry text';
+}
+
+# ---- negative cases: worry must NOT fire -----------------------------------
+
+subtest 'plain sub body does NOT fire the worry' => {
+    # &?BLOCK is not inside any control construct; the walker returns
+    # the sub itself at depth 0, no skip happens.
+    is run-rakuast(q{use v6.d; sub demo { &?BLOCK }; demo()}),
+       '',
+       'STDERR is empty';
+}
+
+subtest 'top-level if-body does NOT fire the worry' => {
+    # No enclosing named block for the walker to walk to; it falls
+    # through to `getcodeobj(curcode())`, the same emit 6.e uses, so
+    # the result agrees on both revisions.
+    is run-rakuast(q{use v6.d; if True { &?BLOCK }}),
+       '',
+       'STDERR is empty';
+}
+
+subtest 'with-body does NOT fire the worry' => {
+    # with-body is not skip-marked; the walker returns it at depth 0.
+    is run-rakuast(q{use v6.d; sub demo { with 1 { &?BLOCK } }; demo()}),
+       '',
+       'STDERR is empty';
+}
+
+subtest 'orwith-body does NOT fire the worry' => {
+    is run-rakuast(q{use v6.d; sub demo { with Nil { } orwith 1 { &?BLOCK } }; demo()}),
+       '',
+       'STDERR is empty';
+}
+
+subtest 'without-body does NOT fire the worry' => {
+    is run-rakuast(q{use v6.d; sub demo { without Nil { &?BLOCK } }; demo()}),
+       '',
+       'STDERR is empty';
+}
+
+subtest 'do-body does NOT fire the worry' => {
+    is run-rakuast(q{use v6.d; sub demo { do { &?BLOCK } }; demo()}),
+       '',
+       'STDERR is empty';
+}
+
+subtest '6.e &?BLOCK inside if-body does NOT fire the worry' => {
+    # The worry only fires under pre-6.e; under 6.e the walker is a
+    # no-op so no diagnostic is emitted.
+    is run-rakuast(q{use v6.e.PREVIEW; sub demo { if True { &?BLOCK } }; demo()}),
+       '',
+       'STDERR is empty';
+}
+
+# vim: expandtab shiftwidth=4

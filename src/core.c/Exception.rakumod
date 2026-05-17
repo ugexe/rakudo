@@ -1449,6 +1449,18 @@ my class X::Package::SameNameAsEnclosing does X::Comp {
     }
 }
 
+my class X::Block::LookupSkippedImplicitBody does X::Comp {
+    method message() {
+        ("&?BLOCK inside the body of an if/unless/while/until/loop/"
+        ~ "repeat/when construct returns an enclosing block (typically "
+        ~ "the surrounding routine or loop body) on Raku 6.d and "
+        ~ "earlier, but the immediate body on 6.e and later. This code "
+        ~ "uses the pre-6.e behavior. To get the 6.e behavior, declare "
+        ~ "'use v6.e.PREVIEW;' at the top of the file."
+        ).naive-word-wrapper
+    }
+}
+
 my class X::Dynamic::Postdeclaration does X::Comp {
     has $.symbol;
     method message() {
