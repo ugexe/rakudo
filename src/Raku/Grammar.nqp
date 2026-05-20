@@ -3197,10 +3197,31 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
     }
 
     token term:sym<fatarrow> {
+        :my $*FATARROW-KEY-XLAT;
         <key=.identifier> <.fatty> <.ws> <val=.EXPR('i<=')>
+        # L10N hook: stash the slang-translated key for the action so
+        # that `elementen => 5` becomes `elems => 5` etc.  Adds nothing
+        # outside L10N scope, since the default `named2str` is identity.
+        { $*FATARROW-KEY-XLAT := self.named2str(~$<key>) }
     }
 
-    token term:sym<colonpair> { <colonpair> }
+    token term:sym<colonpair> {
+        <colonpair>
+        # L10N hook: when a colonpair appears as a term (Pair literal
+        # or operator-adverb position like `1...^ :!elementen`), run
+        # the same `named2str` translation that `arglist` applies to
+        # ColonPair / FatArrow operands of function calls.  Outside
+        # L10N scope `named2str` is identity, so this is a no-op.
+        # Random keys not in the L10N mapping pass through unchanged.
+        {
+            my $actions := self.actions;
+            my $ast := $<colonpair>.ast;
+            $ast.set-key(self.named2str($ast.key))
+                if nqp::can($ast, 'set-key')
+                && (nqp::istype($ast, $actions.r('ColonPair'))
+                    || nqp::istype($ast, $actions.r('FatArrow')));
+        }
+    }
 
     token term:sym<variable> {
         <variable>

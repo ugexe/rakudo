@@ -2055,7 +2055,7 @@ class Raku::Actions is HLL::Actions does Raku::CommonActions {
 
     method term:sym<fatarrow>($/) {
         self.attach: $/, Nodify('FatArrow').new:
-          key   => $*LITERALS.intern-Str(~$<key>),
+          key   => $*LITERALS.intern-Str(~$*FATARROW-KEY-XLAT),
           value => $<val>.ast
     }
 
