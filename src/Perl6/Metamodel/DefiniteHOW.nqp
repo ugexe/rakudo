@@ -50,9 +50,12 @@ class Perl6::Metamodel::DefiniteHOW
             $base_archetypes.generic)
         );
 
-        my $root := nqp::parameterizetype((Perl6::Metamodel::DefiniteHOW.WHO)<root>,
-            [$base_type, $definite ?? Definite !! NotDefinite, $atype]);
-        nqp::setdebugtypename($root, self.name($root));
+        # The setdebugtypename used to live here too; it now runs inside
+        # the parameterizer (see BEGIN block below) so reconstruction via
+        # bare nqp::parameterizetype reproduces the full debug-named
+        # result.
+        nqp::parameterizetype((Perl6::Metamodel::DefiniteHOW.WHO)<root>,
+            [$base_type, $definite ?? Definite !! NotDefinite, $atype])
     }
 
     method name($definite_type) {
@@ -145,10 +148,29 @@ BEGIN {
     my $root := nqp::newtype(Perl6::Metamodel::DefiniteHOW, 'Uninstantiable');
     nqp::setdebugtypename(nqp::settypehll($root, 'Raku'), 'DefiniteHOW root');
 
+    # The parameterizer runs the full definite-type construction AND
+    # the trailing setdebugtypename. The setdebugtypename used to live
+    # in new_type() below, but moving it into the parameterizer means
+    # any caller (the new_type wrapper,
+    # Metamodel::Primitives.parameterize_type, or any future low-level
+    # invocation) gets a fully-debug-named result. The name has to be
+    # computed from $params here because finish_parameterizing has not
+    # run yet, so $thing.HOW.name($thing) (which reads
+    # typeparameterized) would return "?:?" at this point.
     nqp::setparameterizer($root, sub ($type, $params) {
         # Re-use same HOW.
         my $thing := nqp::settypehll(nqp::newtype($type.HOW, 'Uninstantiable'), 'Raku');
-        nqp::settypecheckmode($thing, nqp::const::TYPE_CHECK_NEEDS_ACCEPTS)
+        nqp::settypecheckmode($thing, nqp::const::TYPE_CHECK_NEEDS_ACCEPTS);
+
+        my $base_type      := nqp::atpos($params, 0);
+        my $definite_class := nqp::atpos($params, 1);
+        my $def_name       := $definite_class.HOW.name($definite_class);
+        my $suffix         := nqp::eqat($def_name, 'NotDefinite', 0) ?? 'U' !! 'D';
+        nqp::setdebugtypename(
+          $thing,
+          $base_type.HOW.name($base_type) ~ ':' ~ $suffix
+        );
+        $thing
     });
     (Perl6::Metamodel::DefiniteHOW.WHO)<root> := $root;
 }

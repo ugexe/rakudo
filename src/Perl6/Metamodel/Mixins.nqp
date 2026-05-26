@@ -17,8 +17,20 @@ role Perl6::Metamodel::Mixins {
             method new_type($class) {
                 my $type := nqp::newtype(nqp::create(self), 'Uninstantiable');
 
+                # The parameterizer runs the full mixin construction AND
+                # the trailing setdebugtypename. Keeping the debug-name
+                # update inside the parameterizer (rather than in mixin
+                # below) makes a bare nqp::parameterizetype call produce
+                # the same result, which the MoarVM serializer relies on
+                # when reconstructing cross-SC parameterizations from
+                # their (parametric type, parameters) recipe.
                 nqp::setparameterizer($type, sub ($type, @roles) {
-                    $class.HOW.generate_mixin($class, @roles);
+                    my $mixin_type := $class.HOW.generate_mixin($class, @roles);
+                    nqp::setdebugtypename(
+                      $mixin_type,
+                      $mixin_type.HOW.name($mixin_type) ~ ' mixin'
+                    );
+                    $mixin_type
                 });
 
                 nqp::setdebugtypename(
@@ -43,10 +55,9 @@ role Perl6::Metamodel::Mixins {
             ++$i;
         }
 
+        # The mixin's debug type name is set by the parameterizer above
+        # (see setup_mixin_cache); we don't need to set it again here.
         my $mixin_type := nqp::parameterizetype($!mixin_cache, @roles);
-        nqp::setdebugtypename(
-          $mixin_type, $mixin_type.HOW.name($mixin_type) ~ ' mixin'
-        );
 
         # Ensure there's a mixin attribute, if we need it.
         self.no_single_attribute(nqp::atpos(@roles, 0))
