@@ -35,6 +35,17 @@ class RakuAST::Meta
         $!meta-object-produced || False
     }
 
+    # Seed the meta-object cache before production has finished. A producer
+    # that does extra work after stubbing the type (for example building
+    # synthetic methods whose resolution refers back to the type) can call
+    # this with the stub so that any re-entrant meta-object lookup returns the
+    # object under construction instead of recursively producing it again.
+    method IMPL-SEED-META-OBJECT(Mu $obj) {
+        nqp::bindattr(self, RakuAST::Meta, '$!cached-meta-object', $obj);
+        nqp::bindattr(self, RakuAST::Meta, '$!meta-object-produced', True);
+        Nil
+    }
+
     method compile-time-value() {
         self.meta-object
     }
