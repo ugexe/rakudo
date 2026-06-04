@@ -68,7 +68,13 @@ multi sub infix:<cmp>(\a, Code:D $b) {
      a.Stringy cmp $b.name
 }
 
-multi sub infix:<cmp>(Iterable:D \a, Iterable:D \b) is default {
+multi sub infix:<cmp>(Seq:D \a, Seq:D \b) {
+    infix:<cmp>(a.iterator, b.iterator)
+}
+multi sub infix:<cmp>(Seq:D \a, Iterable:D \b) {
+    infix:<cmp>(a.iterator, b.iterator)
+}
+multi sub infix:<cmp>(Iterable:D \a, Seq:D \b) {
     infix:<cmp>(a.iterator, b.iterator)
 }
 
