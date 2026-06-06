@@ -639,10 +639,28 @@ class RakuAST::CompUnit
             $top-level.set_children([$run-main]);
         }
 
+        # Nested EVAL: interpose an anonymous wrapper QAST::Block between
+        # the parent compunit's SC and the EVAL'd code's static_code, with
+        # `$_`, `$/`, `$?PACKAGE` as static lexpad entries. The wrapper has
+        # no Code object, no add-code-ref call, no entry in
+        # $!sub-id-to-sc-idx, so IMPL-FIXUP-COMPILED-CODEREFS leaves its
+        # static_code without an SC. When the parent compunit's serializer
+        # follows body.outer from an EVAL'd Sub up to the wrapper frame,
+        # closure_to_static_code_ref returns NULL for the wrapper and the
+        # walk terminates. That breaks the chain that otherwise reaches
+        # BEGIN's lexpad and trips on whatever non-serializable state a
+        # BEGIN block holds (Locks, Proc::Async tap closures,
+        # ConditionVariables). Legacy `compile_in_context` at
+        # src/Perl6/World.nqp:2998-3050 uses the same shape.
+        my $outermost := $top-level;
+        if $!is-eval && $context.is-nested {
+            $outermost := self.IMPL-EVAL-WRAPPER-BLOCK($context, $top-level);
+        }
+
         $context.cleanup-orphan-stubs();
 
         QAST::CompUnit.new:
-            $top-level,
+            $outermost,
             :hll('Raku'),
             :sc($!sc),
             :is_nested($!is-eval == 2),
@@ -658,8 +676,42 @@ class RakuAST::CompUnit
             # have occurred.
             :load(QAST::Op.new(
                 :op('call'),
-                QAST::BVal.new( :value($top-level) ),
+                QAST::BVal.new( :value($outermost) ),
             )),
+    }
+
+    method IMPL-EVAL-WRAPPER-BLOCK($context, $inner) {
+        my $statics := QAST::Stmts.new();
+
+        $statics.push(QAST::Var.new(
+            :name('$_'), :scope('lexical'),
+            :decl('static'), :value(Mu)
+        ));
+        $statics.push(QAST::Var.new(
+            :name('$/'), :scope('lexical'),
+            :decl('static'), :value(Nil)
+        ));
+
+        if nqp::isconcrete($!resolver) {
+            my $package := $!resolver.current-package;
+            $context.ensure-sc($package);
+            $statics.push(QAST::Var.new(
+                :name('$?PACKAGE'), :scope('lexical'),
+                :decl('static'), :value($package)
+            ));
+        }
+
+        # `immediate_static` makes the inner mainline auto-invoke when the
+        # wrapper runs and pass its return value through, so EVAL still
+        # returns the user's last-expression value.
+        $inner.blocktype('immediate_static');
+
+        my $wrapper := QAST::Block.new($statics, $inner);
+        $wrapper.name('<eval-wrapper>');
+        $wrapper.blocktype('declaration_static');
+        $wrapper.annotate('IN_DECL', 'eval-wrapper');
+
+        $wrapper
     }
 
     # Emit a QAST::Stmt that, at runtime, ensures the Raku ModuleLoader is

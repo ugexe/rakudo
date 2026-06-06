@@ -2,7 +2,7 @@ use Test;
 use lib <t/packages/Test-Helpers>;
 use Test::Helpers;
 
-plan 113;
+plan 115;
 
 # t/spec/S03-sequence/misc.t
 # https://github.com/rakudo/rakudo/issues/5520
@@ -815,6 +815,25 @@ subtest 'use of &?ROUTINE and &?BLOCK' => {
     my $s2 = BEGIN EVAL 'sub { 1 + 2 }';
     is $s2(), 3,
       'BEGIN-time string-EVAL Sub with setting operator runs';
+}
+
+# Precompiling a module whose BEGIN block returns a Sub from a string EVAL
+{
+    (temp %*ENV)<RAKUDO_RAKUAST> = 1;
+    is-run 'use lib <t/packages/12-rakuast/lib>; use StringEvalSubAtBegin; print foo();',
+      :out("from-precomped-string-eval"),
+      :err(""),
+      'precompiling a module returning a string-EVAL Sub from BEGIN works';
+}
+
+# Precompiling a module whose BEGIN block touches non-serializable state
+# (Proc::Async tap, Lock, ConditionVariable) before EVALing
+{
+    (temp %*ENV)<RAKUDO_RAKUAST> = 1;
+    is-run 'use lib <t/packages/12-rakuast/lib>; use BeginFrameLeakEval; print x();',
+      :out("42"),
+      :err(""),
+      'BEGIN block with Proc::Async tap before EVAL does not leak the BEGIN lexpad through the EVAL Sub';
 }
 
 # vim: expandtab shiftwidth=4

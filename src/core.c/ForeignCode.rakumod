@@ -116,13 +116,32 @@ $lang = 'Raku' if $lang eq 'perl6';
 
         my $LANG := $context<%?LANG>:exists ?? $context<%?LANG> !! Nil;
         my $*INSIDE-EVAL := 1;
-        $compiled := $compiler.compile:
-            $code,
-            :outer_ctx($eval_ctx),
-            :global(GLOBAL),
-            :language_version(nqp::getcomp('Raku').language_version),
-            |(:optimize($_) with nqp::getcomp('Raku').cli-options<optimize>),
-            |(%(:grammar($LANG<MAIN>), :actions($LANG<MAIN-actions>)) if $LANG);
+        if $compiler.exists_stage('qast') {
+            my $comp-unit := $compiler.compile:
+                $code,
+                :outer_ctx($eval_ctx),
+                :global(GLOBAL),
+                :language_version(nqp::getcomp('Raku').language_version),
+                :target('ast'),
+                :compunit_ok(1),
+                |(:optimize($_) with nqp::getcomp('Raku').cli-options<optimize>),
+                |(%(:grammar($LANG<MAIN>), :actions($LANG<MAIN-actions>)) if $LANG);
+            my $qast-cu := $comp-unit.IMPL-TO-QAST-COMP-UNIT;
+            my $eval-context := $comp-unit.context;
+            my $precomp := $compiler.compile($qast-cu, :from('qast'), :compunit_ok(1));
+            $eval-context.IMPL-FIXUP-COMPILED-CODEREFS(nqp::compunitcodes($precomp));
+            $comp-unit.cleanup;
+            $compiled := $compiler.backend.compunit_mainline($precomp);
+        }
+        else {
+            $compiled := $compiler.compile:
+                $code,
+                :outer_ctx($eval_ctx),
+                :global(GLOBAL),
+                :language_version(nqp::getcomp('Raku').language_version),
+                |(:optimize($_) with nqp::getcomp('Raku').cli-options<optimize>),
+                |(%(:grammar($LANG<MAIN>), :actions($LANG<MAIN-actions>)) if $LANG);
+        }
     }
 
     if $check {
