@@ -7980,6 +7980,30 @@ Did you mean a call like '"
             # While the scalar container store op would end up calling .STORE,
             # it may do it in a nested runloop, which gets pricey. This is a
             # simple heuristic check to try and avoid that by calling .STORE.
+
+            # `my %h is Set = ...` binds the variable to `Set.new`, which for the
+            # immutable Set/Bag/Mix is the shared empty sentinel. The initializing
+            # STORE fills its invocant in place, so it would dirty that sentinel.
+            # Bind a fresh instance via nqp::create instead; the STORE below
+            # populates it. Only the initializer path reaches here.
+            if $initialize
+              && nqp::istype($lhs_ast, QAST::Op) && $lhs_ast.op eq 'bind'
+              && nqp::istype($lhs_ast[1], QAST::Op)
+              && $lhs_ast[1].op eq 'callmethod' && $lhs_ast[1].name eq 'new'
+              && !$lhs_ast[1].ann('is-generic')
+              && nqp::istype($lhs_ast[1][0], QAST::WVal) {
+                my $type := $lhs_ast[1][0].value;
+                if nqp::istype($type, $*W.find_symbol(['Set']))
+                  || nqp::istype($type, $*W.find_symbol(['Bag']))
+                  || nqp::istype($type, $*W.find_symbol(['Mix'])) {
+                    $lhs_ast := QAST::Op.new(
+                        :op('bind'),
+                        $lhs_ast[0],
+                        QAST::Op.new(
+                            :op('create'), QAST::WVal.new( :value($type) )));
+                }
+            }
+
             $past := QAST::Op.new(
                 :op('callmethod'), :name('STORE'),
                 $lhs_ast, $rhs_ast);

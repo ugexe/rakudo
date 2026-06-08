@@ -1376,10 +1376,30 @@ class RakuAST::VarDeclaration::Simple
                 if self.IMPL-HAS-EXPLICIT-CONTAINER-BASE-TYPE {
                     my $value := self.IMPL-CONTAINER-TYPE($of);
                     $context.ensure-sc($value);
-                    $qast := QAST::Op.new( :op('bind'), $qast, QAST::Op.new(
-                        :op('callmethod'), :name('new'),
-                        QAST::WVal.new( :$value )
-                    ) );
+                    # Set/Bag/Mix `.new` with no elements returns a shared empty
+                    # sentinel. An initializer STOREs into the variable and the
+                    # immutable QuantHash STORE fills its invocant in place, so
+                    # binding the sentinel would dirty it. Bind a fresh instance
+                    # instead; the STORE that follows populates it. The base type
+                    # is matched by name, since the runtime Set/Bag/Mix are not
+                    # available as constants while this compiler code is built.
+                    my int $fresh := 0;
+                    if $!initializer && !$!initializer.is-binding {
+                        my str $name := nqp::unbox_s(~$value.HOW.name($value));
+                        $fresh := nqp::iseq_s($name, 'Set')
+                               || nqp::iseq_s($name, 'Bag')
+                               || nqp::iseq_s($name, 'Mix')
+                               || nqp::eqat($name, 'Set[', 0)
+                               || nqp::eqat($name, 'Bag[', 0)
+                               || nqp::eqat($name, 'Mix[', 0);
+                    }
+                    my $init-value := $fresh
+                      ?? QAST::Op.new( :op('create'), QAST::WVal.new( :$value ) )
+                      !! QAST::Op.new(
+                           :op('callmethod'), :name('new'),
+                           QAST::WVal.new( :$value )
+                         );
+                    $qast := QAST::Op.new( :op('bind'), $qast, $init-value );
                 }
                 $qast
             }
