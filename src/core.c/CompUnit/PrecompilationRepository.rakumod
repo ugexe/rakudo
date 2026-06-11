@@ -110,8 +110,76 @@ class CompUnit::PrecompilationRepository::Default
                 nqp::exit(0);
             }
         }
+        elsif $handle
+          and ($World && $World.is_precompilation_mode
+            or CALLERS::.EXISTS-KEY('$*CU') && $*CU.precompilation-mode) {
+            $dependency.checksum = $checksum;
+            self!stash-suspended-dependency($dependency, $handle);
+        }
 
         $handle ?? $handle !! Nil
+    }
+
+    # Dependencies loaded while recording is suspended (repository
+    # modules pulled in during $*REPO setup) are deliberately left out
+    # of the compilation's recorded dependencies. But objects owned by
+    # such a module's serialization context, e.g. type
+    # parameterizations interned when the module loaded, can still end
+    # up referenced from the compilation's serialized output, making
+    # the module a real load-time dependency after all. Remember each
+    # suspended dependency, and bind a promotion hook that the
+    # compiler invokes with objects it adopts: if such an object's
+    # owner is one of the remembered contexts, report the dependency
+    # so it gets recorded and the loader knows to preload the module.
+    #
+    # The owning context is recognized two ways. Units whose GLOBALish
+    # package is serialized in the unit's own context (RakuAST-built
+    # precompilations) are keyed by that context's handle. As a
+    # fallback the dependency is also keyed by its source string,
+    # which the compiler puts at the front of the context description
+    # (the $?FILES-derived "<src> (<name>)" form), so units whose
+    # GLOBALish ended up owned by another context still match.
+    my $suspended-deps := nqp::hash;
+    my $promoted-deps  := nqp::hash;
+    method !stash-suspended-dependency(
+      CompUnit::PrecompilationDependency::File:D $dependency,
+      CompUnit::Handle:D $handle,
+    --> Nil) {
+        my str $line = $dependency.serialize;
+        nqp::bindkey($suspended-deps, $dependency.src.Str, $line);
+        my $globalish := nqp::decont($handle.globalish-package);
+        if nqp::isconcrete($globalish) {
+            my $sc := nqp::getobjsc($globalish);
+            nqp::bindkey($suspended-deps, nqp::scgethandle($sc), $line)
+              unless nqp::isnull($sc);
+        }
+
+        if nqp::isnull(nqp::gethllsym('Raku', 'PROMOTE-SUSPENDED-DEPENDENCY')) {
+            nqp::bindhllsym('Raku', 'PROMOTE-SUSPENDED-DEPENDENCY', -> Mu \obj {
+                my $obj-sc := nqp::getobjsc(nqp::decont(obj));
+                unless nqp::isnull($obj-sc) {
+                    my str $key = nqp::scgethandle($obj-sc);
+                    unless nqp::existskey($suspended-deps, $key) {
+                        my str $desc  = nqp::scgetdesc($obj-sc);
+                        my int $space = nqp::index($desc, ' ');
+                        $key = $space < 0 ?? $desc !! nqp::substr($desc, 0, $space);
+                    }
+                    if nqp::existskey($suspended-deps, $key) {
+                        my str $line = nqp::atkey($suspended-deps, $key);
+                        unless nqp::existskey($promoted-deps, $line) {
+                            my $World := $*W;
+                            if $World && $World.record_precompilation_dependencies
+                                or CALLERS::.EXISTS-KEY('$*CU')
+                                    && $*CU.record-precompilation-dependencies {
+                                nqp::bindkey($promoted-deps, $line, 1);
+                                say $line;
+                                $*OUT.flush;
+                            }
+                        }
+                    }
+                }
+            });
+        }
     }
 
     method !load-handle-for-path(CompUnit::PrecompilationUnit:D $unit) {

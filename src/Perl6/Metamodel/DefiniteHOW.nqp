@@ -50,8 +50,9 @@ class Perl6::Metamodel::DefiniteHOW
             $base_archetypes.generic)
         );
 
-        my $root := nqp::parameterizetype((Perl6::Metamodel::DefiniteHOW.WHO)<root>,
-            [$base_type, $definite ?? Definite !! NotDefinite, $atype]);
+        my $root := Perl6::Metamodel::Configuration.note_parameterization(
+          nqp::parameterizetype((Perl6::Metamodel::DefiniteHOW.WHO)<root>,
+            [$base_type, $definite ?? Definite !! NotDefinite, $atype]));
         nqp::setdebugtypename($root, self.name($root));
     }
 

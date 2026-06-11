@@ -126,6 +126,15 @@ class RakuAST::IMPL::QASTContext {
             my int $idx := nqp::scobjcount($sc);
             nqp::scsetobj($sc, $idx, $obj);
         }
+        else {
+            # Owned by another serialization context. If that context
+            # belongs to a module loaded with dependency recording
+            # suspended, referencing the object makes the module a real
+            # load-time dependency; let the precompilation machinery
+            # promote it into the recorded set.
+            my $promote := nqp::gethllsym('Raku', 'PROMOTE-SUSPENDED-DEPENDENCY');
+            $promote($obj) unless nqp::isnull($promote);
+        }
         $obj
     }
 

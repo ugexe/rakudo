@@ -43,7 +43,8 @@ role Perl6::Metamodel::Mixins {
             ++$i;
         }
 
-        my $mixin_type := nqp::parameterizetype($!mixin_cache, @roles);
+        my $mixin_type := Perl6::Metamodel::Configuration.note_parameterization(
+          nqp::parameterizetype($!mixin_cache, @roles));
         nqp::setdebugtypename(
           $mixin_type, $mixin_type.HOW.name($mixin_type) ~ ' mixin'
         );

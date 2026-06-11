@@ -5931,6 +5931,15 @@ class Perl6::World is HLL::World {
         if nqp::isnull(nqp::getobjsc($obj)) {
             self.add_object($obj);
         }
+        else {
+            # Owned by another serialization context. If that context
+            # belongs to a module loaded with dependency recording
+            # suspended, referencing the object makes the module a real
+            # load-time dependency; let the precompilation machinery
+            # promote it into the recorded set.
+            my $promote := nqp::gethllsym('Raku', 'PROMOTE-SUSPENDED-DEPENDENCY');
+            $promote($obj) unless nqp::isnull($promote);
+        }
         $obj
     }
 

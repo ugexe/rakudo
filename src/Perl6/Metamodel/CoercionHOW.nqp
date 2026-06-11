@@ -64,9 +64,11 @@ class Perl6::Metamodel::CoercionHOW
     method archetypes(     $XXX?) { $!archetypes      }
 
     method new_type($target, $constraint) {
-        nqp::parameterizetype(
-          nqp::atkey(Perl6::Metamodel::CoercionHOW.WHO, 'root'),
-          nqp::list($target, $constraint)
+        Perl6::Metamodel::Configuration.note_parameterization(
+          nqp::parameterizetype(
+            nqp::atkey(Perl6::Metamodel::CoercionHOW.WHO, 'root'),
+            nqp::list($target, $constraint)
+          )
         )
     }
 

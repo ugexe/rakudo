@@ -90,6 +90,20 @@ class Perl6::Metamodel::Configuration {
           !! $utility_class.NEXT-ID
     }
 
+    # Invoked with every type parameterization handed out by the
+    # metamodel. The precompilation machinery binds the hll symbol in
+    # processes where a module was loaded with dependency recording
+    # suspended (repository modules pulled in during $*REPO setup), so
+    # it can detect a parameterization owned by such a module's
+    # serialization context and promote the module into the recorded
+    # dependencies. Everywhere else the symbol is unbound and this is
+    # a no-op.
+    method note_parameterization($type) {
+        my $promote := nqp::gethllsym('Raku', 'PROMOTE-SUSPENDED-DEPENDENCY');
+        $promote($type) unless nqp::isnull($promote);
+        $type
+    }
+
     method set_language_revision_type($type) {
         $language-revision-type := $type
     }

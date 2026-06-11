@@ -81,7 +81,8 @@ class Perl6::Metamodel::ParametricRoleGroupHOW
             ++$i;
         }
         nqp::push(@_, %_ || NO_NAMEDS);
-        nqp::parameterizetype($target, @_);
+        Perl6::Metamodel::Configuration.note_parameterization(
+          nqp::parameterizetype($target, @_));
     }
 
     method add_possibility($target, $possible) {
