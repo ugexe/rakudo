@@ -1355,8 +1355,14 @@ class RakuAST::VarDeclaration::Simple
                 QAST::Var.new( :scope('lexical'), :decl('var'), :name(self.name) )
             }
             else {
-                # Need to vivify the object. Note: maybe we want to drop the
-                # contvar, though we'll need an alternative for BEGIN.
+                # The contvar makes the prototype container visible in the
+                # static lexpad for BEGIN-time access. At runtime we bind a
+                # fresh container at the declaration rather than relying on
+                # lazy per-invocation vivification: MoarVM's spesh inliner
+                # does not re-vivify an inlinee's contvar lexicals on each
+                # logical invocation, so a vivified container would be shared
+                # across calls when the frame is inlined into a caller that
+                # invokes it more than once per frame entry.
                 my $container := self.meta-object;
                 $context.ensure-sc($container);
                 my $qast := QAST::Var.new(
@@ -1374,6 +1380,30 @@ class RakuAST::VarDeclaration::Simple
                         ?? QAST::Op.new(:op<create>, $wval)
                         !! QAST::Op.new(:op<callmethod>, :name<new>, $wval)
                     );
+                }
+                elsif !$!is-parameter {
+                    # Parameters are excluded: signature binding initializes
+                    # them on every invocation already.
+                    my $init;
+                    if $sigil eq '@' || $sigil eq '%' {
+                        # Cloning the prototype preserves state such as the
+                        # shape of shaped arrays.
+                        $init := QAST::Op.new(
+                            :op('clone'), QAST::WVal.new( :value($container) )
+                        );
+                    }
+                    else {
+                        # Scalars are built from the descriptor; a WVal of
+                        # the Scalar prototype reaches code compiled at BEGIN
+                        # time decontainerized, which would yield the default
+                        # value instead of a fresh container.
+                        my $descriptor := self.IMPL-CONTAINER-DESCRIPTOR($of);
+                        $context.ensure-sc($descriptor);
+                        $init := QAST::Op.new(
+                            :op('p6scalarfromdesc'), QAST::WVal.new( :value($descriptor) )
+                        );
+                    }
+                    $qast := QAST::Op.new( :op('bind'), $qast, $init );
                 }
                 $qast
             }
