@@ -2272,6 +2272,22 @@ class RakuAST::ApplyListInfix
     method operator() { $!infix }
 
     method IMPL-EXPR-QAST(RakuAST::IMPL::QASTContext $context) {
+        # A comma list discarded in sink context sinks each element rather than
+        # building the list, so an element that must surface, such as a
+        # Failure, is not lost. Sinking the built list does not reach the
+        # elements.
+        if self.sunk
+            && nqp::istype($!infix, RakuAST::Infix)
+            && $!infix.operator eq ','
+            && nqp::elems($!operands)
+            && !nqp::elems($!adverbs)
+        {
+            my $stmts := QAST::Stmts.new;
+            for $!operands {
+                $stmts.push(QAST::Op.new(:op('p6sink'), $_.IMPL-TO-QAST($context)));
+            }
+            return $stmts;
+        }
         my @operands;
         for $!operands {
             @operands.push($_.IMPL-TO-QAST($context));
