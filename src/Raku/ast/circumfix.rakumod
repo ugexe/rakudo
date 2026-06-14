@@ -6,6 +6,7 @@ class RakuAST::Circumfix
 # Grouping parentheses circumfix.
 class RakuAST::Circumfix::Parentheses
   is RakuAST::Circumfix
+  is RakuAST::SinkPropagator
 {
     has RakuAST::SemiList $.semilist;
 
@@ -13,6 +14,12 @@ class RakuAST::Circumfix::Parentheses
         my $obj := nqp::create(self);
         nqp::bindattr($obj, RakuAST::Circumfix::Parentheses, '$!semilist', $semilist);
         $obj
+    }
+
+    method propagate-sink(Bool $is-sunk) {
+        # Parentheses are transparent to sink, so a sunk group sinks its
+        # contents. The default child walk would mark them unsunk instead.
+        $!semilist.apply-sink($is-sunk);
     }
 
     method PERFORM-CHECK(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
