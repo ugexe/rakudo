@@ -27,7 +27,7 @@ class CompUnit::DependencySpecification {
     }
     method version-matcher() {
         nqp::defined($!version-matcher)
-          ?? nqp::istype($!version-matcher,Version)
+          ?? nqp::istype($!version-matcher,Version) || nqp::istype($!version-matcher,Range)
             ?? $!version-matcher
             !! ($!version-matcher := Version.new($!version-matcher))
           !! True
@@ -44,7 +44,7 @@ class CompUnit::DependencySpecification {
         my $parts := nqp::list_s($!short-name);
         nqp::push_s($parts,":from<$!from>")
           if $!from ne 'Raku' && $!from ne 'Perl6';
-        nqp::push_s($parts,":ver<$!version-matcher>")
+        nqp::push_s($parts,':ver<' ~ (nqp::istype($!version-matcher,Range) ?? $!version-matcher.gist !! $!version-matcher) ~ '>')
           if nqp::defined($!version-matcher);
         nqp::push_s($parts,":auth<$!auth-matcher>")
           if nqp::defined($!auth-matcher);
@@ -65,7 +65,11 @@ class CompUnit::DependencySpecification {
         );
         nqp::push_s($parts,",:from<$!from>")
           if $!from ne 'Raku' && $!from ne 'Perl6';
-        nqp::push_s($parts,",:version-matcher<$!version-matcher>")
+        # Precompilation dependency records EVAL this back into a spec, so
+        # a Range must be emitted as an expression rather than a string.
+        nqp::push_s($parts, nqp::istype($!version-matcher,Range)
+          ?? ',:version-matcher(' ~ $!version-matcher.raku ~ ')'
+          !! ",:version-matcher<$!version-matcher>")
           if nqp::defined($!version-matcher);
         nqp::push_s($parts,",:auth-matcher<$!auth-matcher>")
           if nqp::defined($!auth-matcher);
