@@ -74,6 +74,13 @@ class RakuAST::ColonPairish {
                 $v := $v ~ $_
             }
         }
+        elsif !nqp::isstr($v) && nqp::isconcrete($v)
+          && nqp::can($v, 'gist') && $v.HOW.name($v) eq 'Range' {
+            # A Range stringifies by iterating, which dies for endpoints
+            # without a .succ method, like Versions. Quote its gist instead.
+            # Range is not a bootstrap type, so match it by name.
+            $v := $v.gist;
+        }
         if $v ~~ /<[ < > ]>/ && !($v ~~ /<[ « » $ \\ " ' ]>/) {
             '«' ~ $v ~ '»'
         }

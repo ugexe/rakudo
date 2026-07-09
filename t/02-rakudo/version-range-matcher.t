@@ -1,6 +1,6 @@
 use Test;
 
-plan 15;
+plan 17;
 
 # A Range passed as a version-matcher was coerced to a (mangled) Version by
 # CompUnit::DependencySpecification, so `:ver(v1.0.0..*)` never matched an
@@ -49,6 +49,16 @@ my $ds := CompUnit::DependencySpecification;
     ok v1.5.0 ~~ $spec.version-matcher, 'the round-tripped closed range still matches an in-range version';
     my $open = EVAL $ds.new(:short-name<Foo>, :version-matcher(v1.0.0..*)).raku;
     ok $open.version-matcher ~~ Range, 'an open Range survives a .raku round-trip as a Range';
+}
+
+# Compiling a `use` with a Range :ver constraint canonicalizes the module
+# name, which stringified the colonpair's Range value by iterating it.
+{
+    use MONKEY-SEE-NO-EVAL;
+    lives-ok { EVAL 'use Test:ver(v6..v9999)' },
+        'a use statement with a closed Range :ver constraint compiles and loads';
+    lives-ok { EVAL 'use Test:ver(v6..*)' },
+        'a use statement with an open Range :ver constraint compiles and loads';
 }
 
 # vim: expandtab shiftwidth=4
