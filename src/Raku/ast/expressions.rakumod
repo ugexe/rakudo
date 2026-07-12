@@ -845,10 +845,52 @@ class RakuAST::Feed
             # called at the right point.
             $result := QAST::Block.new( $result );
 
-            # Check what we have. XXX Real first step should be looking
-            # for @(*) since if we find that it overrides all other things.
-            # But that's todo...soon. :-)
-            if nqp::istype($stage, QAST::Op) {
+            # A `*` stage is the whatever-feed store: the plain feeds
+            # replace its contents and pass the values on, the appending
+            # feeds append and pass on the whole store, mirroring how a
+            # variable stage behaves.
+            if $stage.ann('feed-whatever-sink') {
+                # Rakudo::Internals is bound as an HLL symbol when the
+                # setting loads, so the store needs no compile-time
+                # setting lookup.
+                $stage := QAST::Op.new(
+                    :op('callmethod'),
+                    :name($appending ?? 'WHATEVER-FEED-APPEND' !! 'WHATEVER-FEED-SET'),
+                    QAST::Op.new(
+                        :op('gethllsym'),
+                        QAST::SVal.new( :value('Raku') ),
+                        QAST::SVal.new( :value('Rakudo::Internals') )
+                    ),
+                    QAST::Op.new(
+                        :op('callmethod'), :name('list'),
+                        QAST::Op.new( :op('call'), $result )
+                    )
+                );
+            }
+            # A stage mentioning a whatever-feed reader ($(*), @(*), %(*))
+            # receives its values through the reader rather than as a
+            # trailing argument: bind them to the dynamic the reader
+            # prefers over the store for the duration of the stage.
+            elsif nqp::istype($stage, QAST::Op) && $stage.ann('feed-whatever-reader') {
+                $stage := QAST::Op.new(
+                    :op('call'),
+                    QAST::Block.new(
+                        QAST::Op.new(
+                            :op('bind'),
+                            QAST::Var.new(
+                                :name('@*WHATEVER-FEED'), :scope('lexical'),
+                                :decl('var')
+                            ),
+                            QAST::Op.new(
+                                :op('callmethod'), :name('list'),
+                                QAST::Op.new( :op('call'), $result )
+                            )
+                        ),
+                        $stage
+                    )
+                );
+            }
+            elsif nqp::istype($stage, QAST::Op) {
                 if $stage.op eq 'call' {
                     # It's a call. Stick a call to the current supplier in
                     # as its last argument.
@@ -2408,9 +2450,21 @@ class RakuAST::ApplyListInfix
     method operator() { $!infix }
 
     method IMPL-EXPR-QAST(RakuAST::IMPL::QASTContext $context) {
+        my int $feed := nqp::istype($!infix, RakuAST::Feed);
         my @operands;
         for $!operands {
-            @operands.push($_.IMPL-TO-QAST($context));
+            my $qast := $_.IMPL-TO-QAST($context);
+            # Mark the whatever-feed shapes for the feed QAST builder,
+            # which only sees the compiled operands.
+            if $feed {
+                if nqp::istype($_, RakuAST::Term::Whatever) {
+                    $qast.annotate('feed-whatever-sink', 1);
+                }
+                elsif self.IMPL-HAS-WHATEVER-FEED-READER($_) {
+                    $qast.annotate('feed-whatever-reader', 1);
+                }
+            }
+            @operands.push($qast);
         }
         for $!adverbs {
             my $arg := $_.IMPL-VALUE-QAST($context);
@@ -2418,6 +2472,22 @@ class RakuAST::ApplyListInfix
             @operands.push($arg);
         }
         $!infix.IMPL-LIST-INFIX-QAST: $context, @operands;
+    }
+
+    method IMPL-HAS-WHATEVER-FEED-READER(RakuAST::Node $node) {
+        my int $found;
+        my $walk;
+        $walk := -> $child {
+            if nqp::istype($child, RakuAST::Contextualizer)
+              && $child.IMPL-WHATEVER-FEED-READER {
+                $found := 1;
+            }
+            elsif !$found {
+                $child.visit-children($walk);
+            }
+        };
+        $node.visit-children($walk);
+        $found
     }
 
     method visit-children(Code $visitor) {
@@ -2446,8 +2516,10 @@ class RakuAST::ApplyListInfix
     }
 
     method IMPL-CUSTOM-SHOULD-CURRY-CONDITIONS() {
-        # Anything but a ','
-        !self.IMPL-IS-LIST-LITERAL
+        # Anything but a ',', and not a feed: a bare `*` in a feed is the
+        # whatever-feed store, and a feed never usefully curries into a
+        # WhateverCode.
+        !self.IMPL-IS-LIST-LITERAL && !nqp::istype($!infix, RakuAST::Feed)
     }
 
     method PERFORM-BEGIN(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
@@ -2527,6 +2599,8 @@ class RakuAST::ApplyListInfix
     method IMPL-IS-VALID-FEED-STAGE($stage) {
         return 1 if nqp::istype($stage, RakuAST::Call);
         return 1 if nqp::istype($stage, RakuAST::Var);
+        # `*` is the whatever-feed store.
+        return 1 if nqp::istype($stage, RakuAST::Term::Whatever);
         # `my @a <== source`: a bare declaration acts as the Var.
         # An initializer (`my @a = grep(...)`) or a shape
         # (`my @a[5]`) makes it a complex expression that legacy

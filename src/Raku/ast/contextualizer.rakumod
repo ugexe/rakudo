@@ -11,14 +11,44 @@ class RakuAST::Contextualizer
         $obj
     }
 
+    # A contextualizer around a lone Whatever ($(*), @(*), %(*)) is the
+    # whatever-feed reader: it contextualizes the values most recently fed
+    # to `*`, or the values fed to the enclosing feed stage.
+    method IMPL-WHATEVER-FEED-READER() {
+        nqp::istype($!target, RakuAST::StatementSequence)
+          && $!target.IMPL-IS-SINGLE-EXPRESSION
+          && nqp::istype(
+               self.IMPL-UNWRAP-LIST($!target.statements)[0].expression,
+               RakuAST::Term::Whatever
+             )
+    }
+
     method IMPL-EXPR-QAST(RakuAST::IMPL::QASTContext $context) {
+        my $target-qast;
+        if self.IMPL-WHATEVER-FEED-READER {
+            # Rakudo::Internals is bound as an HLL symbol when the setting
+            # loads, so the reader needs no compile-time setting lookup.
+            $target-qast := QAST::Op.new(
+                :op('callmethod'), :name('WHATEVER-FEED'),
+                QAST::Op.new(
+                    :op('gethllsym'),
+                    QAST::SVal.new( :value('Raku') ),
+                    QAST::SVal.new( :value('Rakudo::Internals') )
+                )
+            );
+        }
+        else {
+            $target-qast := $!target.IMPL-TO-QAST($context);
+        }
         QAST::Op.new(
             :op('callmethod'), :name(self.IMPL-METHOD),
-            $!target.IMPL-TO-QAST($context)
+            $target-qast
         )
     }
 
-    method IMPL-CAN-INTERPRET() { $!target.IMPL-CAN-INTERPRET }
+    method IMPL-CAN-INTERPRET() {
+        !self.IMPL-WHATEVER-FEED-READER && $!target.IMPL-CAN-INTERPRET
+    }
 
     method IMPL-INTERPRET(RakuAST::IMPL::InterpContext $ctx) {
         my str $method := self.IMPL-METHOD;

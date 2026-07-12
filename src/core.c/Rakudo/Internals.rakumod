@@ -778,6 +778,24 @@ my class Rakudo::Internals {
     }
     method IS-WIN() { $IS-WIN }
 
+    # The store behind the whatever-feed: `42 ==> *` replaces its contents
+    # and `42 ==>> *` appends to them, while $(*), @(*) and %(*) read them
+    # back. A feed stage that mentions a reader gets the values fed to it
+    # bound to @*WHATEVER-FEED around its evaluation, which the reader
+    # prefers over the store.
+    my @WHATEVER-FEED;
+    method WHATEVER-FEED-SET(Mu \values) {
+        @WHATEVER-FEED = values;
+        values
+    }
+    method WHATEVER-FEED-APPEND(Mu \values) {
+        @WHATEVER-FEED.append(values);
+        @WHATEVER-FEED
+    }
+    method WHATEVER-FEED() is raw {
+        nqp::ifnull(nqp::getlexdyn('@*WHATEVER-FEED'), @WHATEVER-FEED)
+    }
+
     method NUMERIC-ENV-KEY(\key) {
         %*ENV.EXISTS-KEY(key)
           ?? %*ENV.AT-KEY(key)

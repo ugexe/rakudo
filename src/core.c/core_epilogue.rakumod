@@ -97,6 +97,10 @@ BEGIN {
 # Required for use in the optimizer
 nqp::bindhllsym('Raku', 'Mu:U', Mu:U);
 
+# Required by the whatever-feed store and readers, whose compiled code
+# references Rakudo::Internals without a compile-time setting lookup
+nqp::bindhllsym('Raku', 'Rakudo::Internals', Rakudo::Internals);
+
 #?if moar
 # Cannot be added in the Uni class, as we don't have native arrays
 # then yet, so it must be done here as an augment.
