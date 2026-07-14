@@ -423,8 +423,8 @@ class Perl6::ModuleLoader does Perl6::ModuleLoaderVMConfig {
                     my str $key := $_.key;
 
                     nqp::bindkey(%current, $key, $_.value)
-                      if nqp::eqat($key, '&', 0);
-                      || nqp::not_i(nqp::existskey(%current, $key))
+                      if nqp::eqat($key, '&', 0)
+                      || nqp::not_i(nqp::existskey(%current, $key));
                 }
             }
             # We could complain about anything else, and may in the future; for
