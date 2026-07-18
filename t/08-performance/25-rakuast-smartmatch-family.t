@@ -3,7 +3,7 @@ use Test::Helpers::QAST;
 use Test;
 use QAST:from<NQP>;
 use nqp;
-plan 28;
+plan 31;
 
 # The helper's walk does not descend a ParamTypeCheck, and a local name
 # identifies the unfolded junction more precisely than any op, so these
@@ -129,4 +129,13 @@ else {
     multi w($x where Int|Str) { 'is' }
     multi w($x) { 'other' }
     is-deeply (w(1), w(3.5e0)), ('is', 'other'), 'multi dispatch over an inline constraint is unchanged';
+}
+
+{
+    is-deeply (0 ~~ 0 ~~ 0, 0 ~~ 0 ~~ 1, 0 ~~ 0 !~~ 1), (True, False, True),
+        'chained smartmatches keep the chain protocol over reduced links';
+    my Int $x = 1;
+    is ($x ~~ Int ~~ Bool), False,
+        'a fold withdrawn from a chain link passes the middle operand along';
+    is (0 ~~ 0 == 0), True, 'a reduced link mixed with a comparison chains correctly';
 }
