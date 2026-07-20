@@ -96,6 +96,13 @@ sub wanted($ast,$by) {
         while ++$i <= $e {
             $ast[$i] := $i == $resultchild ?? wanted($ast[$i], $byby) !! unwanted($ast[$i], $byby);
         }
+        # This while/until loop just lowered to a lazy from-loop; the eager
+        # did-run guard can no longer gate LAST (the flag is set during
+        # reification). The legacy from-loop does not run LAST from its iterator,
+        # so restore the historical unconditional LAST call.
+        if $ast.ann('loop-last-guard') -> $lastcode {
+            $ast[$e] := unwanted($lastcode, $byby);
+        }
         $ast.wanted(1);
     }
     elsif nqp::istype($ast,QAST::Block) {
@@ -2180,6 +2187,11 @@ class Perl6::Actions is HLL::Actions does STDActions {
         my $phasers := nqp::getattr($code, $Block, '$!phasers');
         if nqp::ishash($phasers) {
             my $node := $loop.node;
+            # $loop gets wrapped as FIRST/LAST handling proceeds; keep hold of
+            # the bare loop op and its op name so a LAST guard can reach the
+            # condition after the wrapping.
+            my $loopop := $loop;
+            my $op     := $loop.op;
             if nqp::existskey($phasers, 'NEXT') {
                 my $phascode := $world.run_phasers_code($code, $loop[1], $Block, 'NEXT');
                 if +@($loop) == 2 {
@@ -2203,8 +2215,47 @@ class Perl6::Actions is HLL::Actions does STDActions {
                 $loop[1] := pblock_immediate($loop[1]);
             }
             if nqp::existskey($phasers, 'LAST') {
-                $loop := QAST::Stmts.new(:$node, :resultchild(0), $loop,
-                  $world.run_phasers_code: $code, $loop[1], $Block, 'LAST');
+                my $lastcode := $world.run_phasers_code($code, $loop[1], $Block, 'LAST');
+                # A pre-test while/until loop that never runs its body must not
+                # fire LAST (FIRST already behaves that way). Fold a did-run flag
+                # into the condition, set the moment an iteration starts (before
+                # the body, so an immediate `last` still counts), and gate the
+                # LAST call on it. A repeat loop always runs its body, so it
+                # keeps firing unconditionally.
+                if $op eq 'while' || $op eq 'until' {
+                    my $ran := QAST::Node.unique('LOOP_LAST_RAN');
+                    # A lexical, not a local: in value context the condition is
+                    # compiled into a closure passed to from-loop, so the flag
+                    # must survive that frame boundary.
+                    my $set := QAST::Op.new(:$node, :op<bind>,
+                      QAST::Var.new(:$node, :name($ran), :scope<lexical>, :returns(int)),
+                      QAST::IVal.new(:value(1)));
+                    $loopop[0] := $op eq 'while'
+                      ?? QAST::Op.new(:$node, :op<if>, $loopop[0],
+                           QAST::Stmts.new($set, QAST::IVal.new(:value(1))),
+                           QAST::IVal.new(:value(0)))
+                      !! QAST::Op.new(:$node, :op<if>, $loopop[0],
+                           QAST::IVal.new(:value(1)),
+                           QAST::Stmts.new($set, QAST::IVal.new(:value(0))));
+                    $loop := QAST::Stmts.new(:$node, :resultchild(1),
+                      QAST::Op.new(:$node, :op<bind>,
+                        QAST::Var.new(:$node, :name($ran), :scope<lexical>, :decl<var>, :returns(int)),
+                        QAST::IVal.new(:value(0))),
+                      $loop,
+                      QAST::Op.new(:$node, :op<if>,
+                        QAST::Var.new(:$node, :name($ran), :scope<lexical>, :returns(int)),
+                        $lastcode));
+                }
+                else {
+                    $loop := QAST::Stmts.new(:$node, :resultchild(0), $loop, $lastcode);
+                }
+                # In a wanted (value) context the loop lowers to a lazy from-loop
+                # where the did-run flag is set during reification, too late for
+                # this after-loop guard. The legacy frontend does not ask the
+                # from-loop iterator to run LAST, so restore the historical
+                # unconditional call there (see the loop-last-guard handling in
+                # `wanted`).
+                $loop.annotate('loop-last-guard', $lastcode);
             }
         }
         else {  # no phasers or a lone LEAVE phaser
