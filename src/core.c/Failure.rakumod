@@ -190,7 +190,10 @@ multi sub die(Failure:U $f --> Nil) {
 
 # Actual handler for "use fatal"
 proto sub FATALIZE(|) is implementation-detail {*}
-multi sub FATALIZE(Failure:D $f is raw --> Nil) { $f.exception.throw }
-multi sub FATALIZE(Mu $m is raw --> Mu) is raw  { $m                 }
+# Sinking throws a pending Failure marked as handled and with its original
+# backtrace, and passes an already handled one through as the value, like
+# the p6fatalize op the traditional grammar wraps calls with.
+multi sub FATALIZE(Failure:D $f is raw) is raw  { $f.sink; $f }
+multi sub FATALIZE(Mu $m is raw --> Mu) is raw  { $m          }
 
 # vim: expandtab shiftwidth=4
