@@ -172,6 +172,23 @@ class RakuAST::StatementPrefix::Try
 
     method PERFORM-CHECK(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         # Avoid worries about sink context
+
+        # A block nested somewhere in the prefixed code compiles its body
+        # separately from the QAST this prefix wraps, so mark every one of
+        # them to wrap its own calls, as the traditional grammar does by
+        # keeping the fatal pragma on while it parses the try's code. A
+        # scope with an explicit `use fatal`/`no fatal` governs itself and
+        # everything under it.
+        self.IMPL-FATALIZE-NESTED-SCOPES(self.blorst);
+    }
+
+    method IMPL-FATALIZE-NESTED-SCOPES(RakuAST::Node $node) {
+        if nqp::istype($node, RakuAST::LexicalScope) {
+            return Nil if nqp::isconcrete($node.fatal);
+            $node.set-fatalize-failures(True);
+        }
+        $node.visit-children(-> $child { self.IMPL-FATALIZE-NESTED-SCOPES($child) });
+        Nil
     }
 
     method PRODUCE-IMPLICIT-LOOKUPS() {
@@ -179,7 +196,16 @@ class RakuAST::StatementPrefix::Try
             RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('Nil')),
             RakuAST::Var::Lexical.new('$!'),
             RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('Failure')),
+            RakuAST::Type::Setting.new(RakuAST::Name.from-identifier('&FATALIZE')),
         ]
+    }
+
+    method IMPL-FATALIZE() {
+        self.IMPL-UNWRAP-LIST(self.get-implicit-lookups)[3].resolution.compile-time-value
+    }
+
+    method IMPL-FATALIZE-RESOLVED() {
+        self.IMPL-UNWRAP-LIST(self.get-implicit-lookups)[3].is-resolved
     }
 
     method IMPL-EXPR-QAST(RakuAST::IMPL::QASTContext $context) {
@@ -198,6 +224,15 @@ class RakuAST::StatementPrefix::Try
 
             my $tmp := QAST::Node.unique('fatalizee');
             my $qast := self.IMPL-CALLISH-QAST($context);
+
+            # A statement form evaluates its expression right here rather
+            # than in a block whose fatalize-failures flag would wrap its
+            # calls, so wrap them now: a Failure produced inside the
+            # expression must throw and be caught, not flow onward as an
+            # ordinary value. A block form already wraps during its own
+            # QAST compilation.
+            self.IMPL-FATALIZE-QAST($qast, 0)
+                if !nqp::istype($blorst, RakuAST::Block) && self.IMPL-FATALIZE-RESOLVED;
 
             # Success path puts Nil into $! and evaluates to the block.
             my $success := QAST::Stmts.new(

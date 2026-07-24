@@ -469,11 +469,6 @@ class RakuAST::LexicalScope
         ));
     }
 
-    # Should return the lookup result for Failure
-    method IMPL-FATALIZE {
-        nqp::die("IMPL-FATALIZE NYI on " ~ self.HOW.name(self));
-    }
-
     # Whether the &FATALIZE lookup this scope would wrap calls with has been
     # resolved. In the setting a block compiled before &FATALIZE is declared
     # has no resolution to wrap with.
@@ -482,88 +477,16 @@ class RakuAST::LexicalScope
     }
 
     method IMPL-MAYBE-FATALIZE-QAST($qast) {
-        self.IMPL-FATALIZE-QAST($qast, 0)
-            if $!fatal || $!fatalize-failures && self.IMPL-FATALIZE-RESOLVED;
-
+        if $!fatal || $!fatalize-failures && self.IMPL-FATALIZE-RESOLVED {
+            self.IMPL-FATALIZE-QAST($qast, 0);
+        }
+        elsif nqp::isconcrete($!fatal) {
+            # An explicit `no fatal` governs this block: mark it so an
+            # enclosing fatalized scope's walk over the QAST it is nested
+            # in leaves its calls unwrapped.
+            $qast.annotate('no-fatalize', 1);
+        }
         $qast
-    }
-
-    method IMPL-FATALIZE-QAST($qast, $bool-context) {
-        my &FATALIZE := self.IMPL-FATALIZE;
-        # comes from setting, so guaranteed to be in an SC
-        my $FATALIZE := QAST::WVal.new(:value(&FATALIZE));
-        my constant BOOLIFY_FIRST_CHILD_OPS := nqp::hash(
-            'if',           1,
-            'unless',       1,
-            'defor',        1,
-            'hllbool',      1,
-            'while',        1,
-            'until',        1,
-            'repeat_while', 1,
-            'repeat_until', 1,
-        );
-        my constant BOOLIFY_FIRST_CHILD_CALLS := nqp::hash(
-            '&prefix:<?>',   1,
-            '&prefix:<so>',  1,
-            '&prefix:<!>',   1,
-            '&prefix:<not>', 1,
-            '&defined',      1
-        );
-        if nqp::istype($qast, QAST::Op) {
-            my str $op := $qast.op;
-            if $op eq 'call' && nqp::istype($qast[0], QAST::WVal) && $qast[0].value =:= &FATALIZE {
-                # We've been here before (tree with shared bits, presumably).
-            }
-            elsif nqp::existskey(BOOLIFY_FIRST_CHILD_OPS, $op) ||
-                    ($op eq 'call' || $op eq 'callstatic')
-                    && nqp::existskey(BOOLIFY_FIRST_CHILD_CALLS, $qast.name) {
-                my int $first := 1;
-                for @($qast) {
-                    if $first {
-                        self.IMPL-FATALIZE-QAST($_, 1);
-                        $first := 0;
-                    }
-                    else {
-                        self.IMPL-FATALIZE-QAST($_, 0);
-                    }
-                }
-            }
-            elsif $op eq 'hllize' {
-                self.IMPL-FATALIZE-QAST($_, $bool-context) for @($qast);
-            }
-            else {
-                 self.IMPL-FATALIZE-QAST($_, 0) for @($qast);
-                 # Don't wrap a flattening arg (the synthetic FLATTENABLE_LIST/
-                 # HASH calls): :flat must stay on the real result, not on a
-                 # FATALIZE wrapper. The operand is still fatalized above.
-                 if !$bool-context
-                    && ($op eq 'call' || $op eq 'callstatic' || $op eq 'callmethod')
-                    && !$qast.flat {
-                    if $qast.name eq '&fail' {
-                        $qast.name('&die');
-                    }
-                    else {
-                        my $new-node := QAST::Op.new( :node($qast.node), :$op, :name($qast.name), :returns($qast.returns) );
-                        $new-node.push($qast.shift) while @($qast);
-                        $qast.op('call');
-                        $qast.name('');
-
-                        $qast.push($FATALIZE);
-                        $qast.push($new-node);
-                    }
-                 }
-            }
-        }
-        elsif nqp::istype($qast, QAST::Want) {
-            # The alternates render the same computation as the primary in
-            # native kinds, which can never be a Failure, so only the primary
-            # is walked. The primary may appear again as an alternate, and
-            # walking it once keeps the cost linear.
-            self.IMPL-FATALIZE-QAST($qast[0], 0) if nqp::elems($qast.list);
-        }
-        elsif nqp::istype($qast, QAST::Block) || nqp::istype($qast, QAST::Stmt) || nqp::istype($qast, QAST::Stmts) {
-            self.IMPL-FATALIZE-QAST($_, 0) for @($qast);
-        }
     }
 }
 
