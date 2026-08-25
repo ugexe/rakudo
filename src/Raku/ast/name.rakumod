@@ -224,6 +224,8 @@ class RakuAST::Name
     }
 
     method canonicalize(:$colonpairs) {
+        my $simple := self.simple-identifier;
+        return $simple if $simple && !nqp::elems($!colonpairs);
         my $canon-parts := nqp::list_s();
         my $first := 1;
         for $!parts {

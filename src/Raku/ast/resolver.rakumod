@@ -3,6 +3,12 @@ class RakuAST::Resolver {
     # The setting.
     has Mu $.setting;
 
+    # Memo of setting lexical lookups by name, misses included. A loaded
+    # setting's lexpads do not change, so a name answers with the same
+    # declaration every time, and set-setting clears this when it swaps
+    # the setting. Consumers share one node and must not mutate it.
+    has Mu $!setting-constants;
+
     # Our outer context. When not an EVAL, this is the same as $!setting.
     has Mu $!outer;
 
@@ -555,10 +561,17 @@ class RakuAST::Resolver {
             }
             nqp::die("Could not find setting revision $setting-rev trying to look up $name");
         }
+        elsif $!setting {
+            my $cache := $!setting-constants;
+            nqp::ishash($cache) || ($cache := nqp::bindattr(self,
+                RakuAST::Resolver, '$!setting-constants', nqp::hash()));
+            nqp::existskey($cache, $name)
+                ?? nqp::atkey($cache, $name)
+                !! nqp::bindkey($cache, $name,
+                    self.resolve-lexical-constant-in-context($!setting, $name))
+        }
         else {
-            $!setting
-                ?? self.resolve-lexical-constant-in-context($!setting, $name)
-                !! self.resolve-lexical-constant($name) # Compiling CORE.setting
+            self.resolve-lexical-constant($name) # Compiling CORE.setting
         }
     }
 
@@ -1482,6 +1495,8 @@ class RakuAST::Resolver::Compile
     method set-setting(Str :$setting-name!) {
         my $loader := nqp::gethllsym('Raku', 'ModuleLoader');
         my $setting := $loader.load_setting($setting-name);
+        # The memo answers for the setting being replaced.
+        nqp::bindattr(self, RakuAST::Resolver, '$!setting-constants', Mu);
         nqp::bindattr(self, RakuAST::Resolver, '$!setting', $setting);
         nqp::bindattr(self, RakuAST::Resolver, '$!outer', $setting);
     }
