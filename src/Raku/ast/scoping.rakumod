@@ -229,26 +229,46 @@ class RakuAST::LexicalScope
         unless $!generated-lexical-declarations {
             nqp::bindattr(self, RakuAST::LexicalScope, '$!generated-lexical-declarations', []);
         }
-        for $!generated-lexical-declarations {
-            if ($_.lexical-name // '') eq $declaration.lexical-name {
-                if $_.compile-time-value =:= $declaration.compile-time-value {
-                    return Nil
-                }
-                elsif nqp::decont($_.compile-time-value) =:= nqp::decont($declaration.compile-time-value) {
-                    return Nil
-                }
-                elsif $force {
-                    $_.set-value($declaration.compile-time-value);
-                    return Nil
-                }
-                else {
-                    $_.merge($declaration, :$resolver);
-                    return Nil;
+        # The lookup hash holds named entries only, so a declaration
+        # without a name scans the list. The hash answers with the last
+        # entry of a name, which is the one a lookup of that name finds.
+        my $name := $declaration.lexical-name;
+        my $existing;
+        if $name {
+            $existing := self.find-generated-lexical($name);
+        }
+        else {
+            for $!generated-lexical-declarations {
+                unless $_.lexical-name // '' {
+                    $existing := $_;
+                    last;
                 }
             }
         }
+        if nqp::isconcrete($existing) {
+            if $existing.compile-time-value =:= $declaration.compile-time-value {
+                return Nil
+            }
+            elsif nqp::decont($existing.compile-time-value) =:= nqp::decont($declaration.compile-time-value) {
+                return Nil
+            }
+            elsif $force {
+                $existing.set-value($declaration.compile-time-value);
+                return Nil
+            }
+            else {
+                $existing.merge($declaration, :$resolver);
+                return Nil;
+            }
+        }
         nqp::push($!generated-lexical-declarations, $declaration);
-        nqp::bindattr(self, RakuAST::LexicalScope, '$!generated-lexical-lookup-hash', Mu);
+        # The bind matches how find-generated-lexical builds the hash, so
+        # it stays in step and is not dropped. An entry's name must not
+        # change after this, or the hash keeps the old key.
+        my %lookup := $!generated-lexical-lookup-hash;
+        if nqp::isconcrete(%lookup) && $name {
+            %lookup{$name} := $declaration;
+        }
         Nil
     }
 
