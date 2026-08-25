@@ -1307,6 +1307,7 @@ class RakuAST::ImplicitLookups
   is RakuAST::Node
 {
     has List $!implicit-lookups-cache;
+    has int $!implicit-lookups-driven;
 
     # A node typically implements this to specify the implicit lookups
     # that it needs. This is called once per instance of a node and then
@@ -1325,13 +1326,21 @@ class RakuAST::ImplicitLookups
             !! [])
     }
 
-    # Drive the implicit lookups to their begin time.
+    # Drive the implicit lookups to their begin time. Each lookup guards
+    # its own parse and begin time, so one drive serves however many
+    # walks reach the node. A node that changes its implicit lookups
+    # must clear $!implicit-lookups-driven. The flag is set after the
+    # loop, so a drive that throws is retried by the next walk.
     method implicit-lookups-to-begin-time(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
-        for self.IMPL-UNWRAP-LIST(self.get-implicit-lookups()) {
-            # We use null to pad out lookup lists so that they always
-            # have the same number of elements regardless of whether
-            # some lookups can only be conditionally included in the list
-            $_.to-begin-time($resolver, $context) unless nqp::isnull($_);
+        unless $!implicit-lookups-driven {
+            for self.IMPL-UNWRAP-LIST(self.get-implicit-lookups()) {
+                # We use null to pad out lookup lists so that they always
+                # have the same number of elements regardless of whether
+                # some lookups can only be conditionally included in the list
+                $_.to-begin-time($resolver, $context) unless nqp::isnull($_);
+            }
+            nqp::bindattr_i(self, RakuAST::ImplicitLookups,
+                '$!implicit-lookups-driven', 1);
         }
     }
 }
