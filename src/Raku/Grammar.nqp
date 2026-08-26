@@ -48,8 +48,8 @@ role Raku::Common {
         <.panic: "Internal error: O() should not be used anymore">
     }
 
-    # The alternatives for fat arrows
-    token fatty { \h* [ '=>' | '⇒' ] }
+    # The fat arrow in autoquoting position
+    token fatty { \h* '=>' }
 
     # The current language revision (1 = 6.c, 2 = 6.d, 3 = 6.e)
     method language-revision() { nqp::getcomp('Raku').language_revision }
@@ -3740,7 +3740,7 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
         $<text>=[.*?]
         '}'
         <!{ $*IN-DECL }>
-        <!{ $<text> ~~ / [ '=>' | '⇒' ] || ':'<:alpha> || '|%' / }>
+        <!{ $<text> ~~ / '=>' || ':'<:alpha> || '|%' / }>
         <!{ $<text> ~~ / ^ \s* $ / }>
         <?{
             my $sigil := $<sigil>.Str;
