@@ -1756,6 +1756,14 @@ class Raku::Actions is HLL::Actions does Raku::CommonActions {
         self.attach: $/, Nodify('Assignment').new(:item($*ITEM));
     }
 
+    # Bind is compiled structurally by operator name, so the unicode
+    # spelling must normalize here to keep that name distinct from a
+    # user declared infix:<≔>. The typed spelling is kept for
+    # diagnostics.
+    method infix:sym<:=>($/) {
+        self.attach: $/, Nodify('Infix').new(':=', :spelling(~$/));
+    }
+
     # These infix operators are purely a grammar construct at the moment
     method infix:sym«==>»($/)   { self.attach: $/, Nodify('Feed').new($<sym>) }
     method infix:sym«<==»($/)   { self.attach: $/, Nodify('Feed').new($<sym>) }

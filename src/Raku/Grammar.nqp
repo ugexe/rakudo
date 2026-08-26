@@ -2787,7 +2787,10 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
     token infix:sym<.=> { <.sym> }
 
     # Assignment infixes
-    token infix:sym<:=>  { ':=' | '≔' }
+    # The unicode spelling means binding only while no infix:<≔> is
+    # declared, since binding compiles structurally and could otherwise
+    # never be shadowed the way a declared operator shadows core ops.
+    token infix:sym<:=>  { ':=' | '≔' <!{ $*R.is-identifier-known('&infix:<≔>', :exact) }> }
     token infix:sym<::=> { <sym> <.NYI: '"::="'> }
 
     # Iffy multiplicative infixes

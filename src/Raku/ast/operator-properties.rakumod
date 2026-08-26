@@ -740,7 +740,6 @@ class OperatorProperties {
           '=',  'list assignment',
           '@=', 'list assignment',   # dummy for @a = 1,2,3
           ':=', 'list assignment',
-          '≔',  'list assignment',
 
           ':', 'comma',              # dummy for chop 42:
           ',', 'comma',

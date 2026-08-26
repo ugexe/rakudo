@@ -374,7 +374,6 @@ class RakuAST::Infix
     method is-pure() {
         my constant NP := nqp::hash(
           ':=',   False,
-          '≔',    False,
           '~~',   False,
           'does', False,
           '⚛=',   False,
@@ -452,7 +451,6 @@ class RakuAST::Infix
             '^…^'        , 0,
             '='          , 0,
             ':='         , 0,
-            '≔'          , 0,
             ':'          , 0,
             '&&'         , 0,
             '||'         , 0,
@@ -493,7 +491,7 @@ class RakuAST::Infix
         # Hash value is negation flag
         my constant OP-SMARTMATCH := nqp::hash( '~~', 0, '!~~', 1 );
         my str $op := $!operator;
-        if $op eq ':=' || $op eq '≔' {
+        if $op eq ':=' {
             if $left.can-be-bound-to {
                 $left.IMPL-BIND-QAST($context, $right.IMPL-TO-QAST($context))
             }
@@ -2610,7 +2608,7 @@ class RakuAST::ApplyInfix
         # a "normal" infix op
         elsif nqp::istype($infix, RakuAST::Infix) {
             my str $infix-op := $infix.operator;
-            if ($infix-op eq ':=' || $infix-op eq '≔') && !$left.can-be-bound-to {
+            if $infix-op eq ':=' && !$left.can-be-bound-to {
                 self.add-sorry: $left.build-bind-exception($resolver);
             }
 
