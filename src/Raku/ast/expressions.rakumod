@@ -493,7 +493,41 @@ class RakuAST::Infix
         my str $op := $!operator;
         if $op eq ':=' {
             if $left.can-be-bound-to {
-                $left.IMPL-BIND-QAST($context, $right.IMPL-TO-QAST($context))
+                my $source-qast := $right.IMPL-TO-QAST($context);
+
+                # The source must be asserted against the target's bind
+                # constraint. The assertion only belongs to a bind written
+                # as an expression: the parameter binder does its own type
+                # checking and reuses the same bind QAST underneath. While
+                # compiling the CORE setting the sigil types are not fully
+                # composed yet, so the assertion cannot run there. A generic
+                # type is unresolved at this point, so asserting it would
+                # reject valid binds inside a role body. A & variable is
+                # excluded because its calculated bind constraint wraps the
+                # Callable around the declared type twice.
+                my $target := nqp::istype($left, RakuAST::Lookup) && $left.is-resolved
+                    ?? $left.resolution
+                    !! $left;
+                if nqp::can($target, 'IMPL-BIND-CONSTRAINT')
+                  && nqp::can($target, 'IMPL-OF-TYPE')
+                  && !(nqp::can($target, 'sigil') && $target.sigil eq '&')
+                  && !$*COMPILING_CORE_SETTING {
+                    my $of := $target.IMPL-OF-TYPE;
+                    unless nqp::objprimspec($of) {
+                        my $bind-constraint := $target.IMPL-BIND-CONSTRAINT($of);
+                        unless nqp::eqaddr($bind-constraint, Mu)
+                          || nqp::can($bind-constraint.HOW, 'archetypes')
+                             && $bind-constraint.HOW.archetypes($bind-constraint).generic {
+                            $context.ensure-sc($bind-constraint);
+                            $source-qast := QAST::Op.new(
+                                :op('p6bindassert'),
+                                $source-qast,
+                                QAST::WVal.new( :value($bind-constraint) )
+                            );
+                        }
+                    }
+                }
+                $left.IMPL-BIND-QAST($context, $source-qast)
             }
             else {
                 nqp::die('Cannot compile bind to ' ~ $left.HOW.name($left));
