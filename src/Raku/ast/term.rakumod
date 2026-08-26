@@ -554,7 +554,7 @@ class RakuAST::Term::Reduce
           ?? self.add-sorry(
                $resolver.build-exception("X::Syntax::CannotMeta",
                  meta     => "reduce",
-                 operator => self.infix.operator,
+                 operator => self.infix.spelling,
                  dba      => self.properties.dba,
                  reason   => $reason
                )

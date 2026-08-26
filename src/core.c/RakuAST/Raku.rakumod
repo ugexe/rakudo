@@ -502,7 +502,12 @@ augment class RakuAST::Node {
 
     # Also for ::FlipFlop
     multi method raku(RakuAST::Infix:D: --> Str:D) {
-        self!literal(self.operator)
+        my str $operator = self.operator;
+        my str $spelling = self.spelling;
+        $spelling eq $operator
+          ?? self!literal($operator)
+          !! self.^name
+               ~ '.new(' ~ $operator.raku ~ ', :spelling(' ~ $spelling.raku ~ '))'
     }
 
     multi method raku(RakuAST::Initializer::Assign:D: --> Str:D) {

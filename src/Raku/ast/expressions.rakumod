@@ -211,6 +211,11 @@ class RakuAST::Infixish
     # Override on infixes whose call returns a lazy producer (needs p6sink).
     method IMPL-RESULT-NEEDS-ITERATION() { False }
 
+    # The operator as written in the source, for nodes that distinguish
+    # that from the name they compile under. Diagnostics that name an
+    # operator should use this rather than the compiled name.
+    method spelling() { self.operator }
+
     # A node can implement this if it wishes to have full control of the
     # compilation of nodes. Most implement IMPL-INFIX-QAST, which gets the
     # QAST of the operands.
@@ -302,12 +307,16 @@ class RakuAST::Infix
   is RakuAST::CheckTime
 {
     has str $.operator;
+    has str $!spelling;
 
-    method new(str $operator) {
+    method new(str $operator, str :$spelling) {
         my $obj := nqp::create(self);
         nqp::bindattr_s($obj, RakuAST::Infix, '$!operator', $operator);
+        nqp::bindattr_s($obj, RakuAST::Infix, '$!spelling', $spelling // '');
         $obj
     }
+
+    method spelling() { $!spelling || $!operator }
 
     method default-operator-properties() {
         OperatorProperties.infix($!operator)
@@ -1404,6 +1413,8 @@ class RakuAST::BracketedInfix
 
     method operator() { $!infix }
 
+    method spelling() { $!infix.spelling }
+
     method reducer-name() { $!infix.reducer-name }
 
     method IMPL-OPERATOR() {
@@ -1486,7 +1497,7 @@ class RakuAST::MetaInfix
           ?? self.add-sorry(
                $resolver.build-exception("X::Syntax::CannotMeta",
                  meta     => self.action,
-                 operator => self.infix.operator,
+                 operator => self.infix.spelling,
                  dba      => self.properties.dba,
                  reason   => "too fiddly"
                )
@@ -1549,7 +1560,7 @@ class RakuAST::MetaInfix::Assign
           ?? self.add-sorry(
                $resolver.build-exception("X::Syntax::CannotMeta",
                  meta     => "assign",
-                 operator => self.infix.operator,
+                 operator => self.infix.spelling,
                  reason   => "too fiddly or diffy"
                )
              )
@@ -1841,7 +1852,7 @@ class RakuAST::MetaInfix::Negate
           || self.add-sorry:
                $resolver.build-exception: "X::Syntax::CannotMeta",
                  meta     => "negate",
-                 operator => self.infix.operator,
+                 operator => self.infix.spelling,
                  dba      => self.properties.dba,
                  reason   => "not iffy enough"
     }
