@@ -1,7 +1,7 @@
 use nqp;
 use Test;
 
-plan 22;
+plan 32;
 
 # The unicode fat arrow is an infix alias for the Pair constructor and
 # does not participate in identifier autoquoting, so its left side is
@@ -41,6 +41,22 @@ plan 22;
     is (1 ≔ 2), "imported", 'an imported infix:<≔> is dispatched rather than treated as a bind operator';
     my \k = 1;
     is (k ⇒ 2), "imported", 'an imported infix:<⇒> is dispatched after an identifier term';
+    is (my $y ≔ 6), "imported", 'a declaration followed by the unicode bind spelling dispatches to an imported infix:<≔>';
+}
+
+{
+    my $seen;
+    sub infix:<≔>(\a, \b) { $seen = b; "user" }
+    my $x ≔ 5;
+    is $seen, 5, 'a declaration followed by the unicode bind spelling dispatches to a declared infix:<≔>';
+    ok $x === Any, 'the declined initializer leaves the declared variable unbound';
+}
+
+{
+    my $seen;
+    sub infix:<≔>(\a, \b) { $seen = b }
+    my class C { has $.x ≔ 1 }
+    is $seen, 1, 'an attribute declaration followed by the unicode bind spelling dispatches to a declared infix:<≔> rather than panicking';
 }
 
 {
@@ -84,6 +100,33 @@ plan 22;
     todo 'the legacy grammar has no unicode bind spelling' unless $rakuast;
     throws-like q«my ($a, $b); $a R≔ $b», X::Syntax::CannotMeta, meta => 'reverse the args of', operator => '≔',
       'a reversal of the unicode bind spelling names the operator as typed';
+
+    todo 'the legacy grammar has no unicode bind spelling' unless $rakuast;
+    throws-like q«my Int $b ≔ "x"», X::TypeCheck::Binding,
+      'the unicode bind spelling in a declaration asserts the declared type';
+
+    todo 'the legacy grammar has no unicode bind spelling' unless $rakuast;
+    is (try EVAL q«my ($x, $y) ≔ (1, 2); "$x $y"»), "1 2",
+      'the unicode bind spelling binds a signature declaration';
+
+    todo 'the legacy grammar has no unicode bind spelling' unless $rakuast;
+    is (try EVAL q«constant c ≔ 5; c»), 5,
+      'the unicode bind spelling initializes a constant declaration';
+
+    todo 'the legacy grammar has no unicode bind spelling' unless $rakuast;
+    is (try EVAL q«my \k ≔ 5; k»), 5,
+      'the unicode bind spelling initializes a term declaration';
+
+    todo 'the legacy grammar has no unicode bind spelling' unless $rakuast;
+    throws-like q«my class AttrBindUnicode { has $.x ≔ 1 }», Exception,
+      message => /'Cannot use ≔ to initialize an attribute'/,
+      'the unicode bind spelling is rejected as an attribute initializer naming the operator as typed';
+}
+
+{
+    throws-like q«my class AttrBindAscii { has $.x := 1 }», Exception,
+      message => /'Cannot use := to initialize an attribute'/,
+      'the ascii bind spelling is rejected as an attribute initializer';
 }
 
 {

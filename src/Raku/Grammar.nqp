@@ -4138,7 +4138,10 @@ grammar Raku::Grammar is HLL::Grammar does Raku::Common {
         ]
     }
     token initializer:sym<:=> {
-        <.sym> [ <.ws> <EXPR('e=')> || <.malformed: 'binding'> ]
+        # The unicode alternative and its guard must stay in lockstep with
+        # infix:sym<:=>, which carries the explanation.
+        $<sym>=[ ':=' | '≔' <!{ $*R.is-identifier-known('&infix:<≔>', :exact) }> ]
+        [ <.ws> <EXPR('e=')> || <.malformed: 'binding'> ]
     }
     token initializer:sym<::=> {
         <.sym> [ <.ws> <EXPR('e=')> <.NYI: '"::="'> || <.malformed: 'binding'> ]

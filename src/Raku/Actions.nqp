@@ -3011,8 +3011,9 @@ class Raku::Actions is HLL::Actions does Raku::CommonActions {
 
         my $initializer := $<initializer>;
         if $initializer {
-            $/.panic("Cannot use := to initialize an attribute")
-              if $scope eq 'has' && $initializer<sym> eq ':=';
+            $/.panic("Cannot use " ~ $initializer<sym> ~ " to initialize an attribute")
+              if $scope eq 'has'
+              && nqp::istype($initializer.ast, Nodify('Initializer::Bind'));
 
             $var.set-initializer($initializer.ast);
         }
