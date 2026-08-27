@@ -2727,6 +2727,22 @@ class RakuAST::ApplyInfix
         !nqp::isnull($type) && nqp::objprimspec($type) ?? $type !! Mu
     }
 
+    # Pure when the operator is pure, both operands are structurally
+    # pure, and one trial evaluation of the whole application survives.
+    # An adverb's expression is not examined for purity, so its
+    # presence declines.
+    method IMPL-PURE-STRUCTURE() {
+        self.IMPL-PURE-OPERATOR($!infix)
+          && !nqp::isconcrete($!args.arg-at-pos(2))
+          && self.left.IMPL-PURE-STRUCTURE
+          && self.right.IMPL-PURE-STRUCTURE
+            ?? True !! False
+    }
+    method pure() {
+        self.IMPL-PURE-STRUCTURE && self.IMPL-PURE-EVALUATION
+            ?? True !! False
+    }
+
     method IMPL-IS-XX() {
         (my $operator := self.operator)
         && nqp::istype($operator, RakuAST::Infix)
@@ -2810,6 +2826,23 @@ class RakuAST::ApplyListInfix
     }
 
     method operator() { $!infix }
+
+    # Pure when the operator is pure, every operand is structurally
+    # pure, and one trial evaluation of the whole application survives.
+    # An adverb's expression is not examined for purity, so its
+    # presence declines.
+    method IMPL-PURE-STRUCTURE() {
+        return False unless self.IMPL-PURE-OPERATOR($!infix)
+          && nqp::elems($!adverbs) == 0;
+        for $!operands {
+            return False unless $_.IMPL-PURE-STRUCTURE;
+        }
+        True
+    }
+    method pure() {
+        self.IMPL-PURE-STRUCTURE && self.IMPL-PURE-EVALUATION
+            ?? True !! False
+    }
 
     method IMPL-EXPR-QAST(RakuAST::IMPL::QASTContext $context) {
         my @operands;
@@ -3306,6 +3339,21 @@ class RakuAST::ApplyPrefix
     }
 
     method operator() { $!prefix }
+
+    # Pure when the operator is pure, the operand is structurally pure,
+    # and one trial evaluation of the whole application survives. An
+    # adverb's expression is not examined for purity, so its presence
+    # declines.
+    method IMPL-PURE-STRUCTURE() {
+        self.IMPL-PURE-OPERATOR($!prefix)
+          && nqp::elems($!prefix.colonpairs) == 0
+          && $!operand.IMPL-PURE-STRUCTURE
+            ?? True !! False
+    }
+    method pure() {
+        self.IMPL-PURE-STRUCTURE && self.IMPL-PURE-EVALUATION
+            ?? True !! False
+    }
 
     # Set by the optimize pass to the native primitive spec when this is a
     # native increment or decrement to lower to a raw op.

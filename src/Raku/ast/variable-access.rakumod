@@ -53,6 +53,15 @@ class RakuAST::Var::Lexical
         ($!sigil // '') ~ ($!twigil // '') ~ $!desigilname.canonicalize
     }
 
+    # A reference to a once-bound value is pure: evaluating it is a
+    # lookup that runs no code. Any other variable read goes through its
+    # container, whose FETCH may have effects, so it keeps the False
+    # default.
+    method pure() {
+        self.is-resolved && self.IMPL-PURE-RESOLUTION(self.resolution)
+            ?? True !! False
+    }
+
     method can-be-bound-to() {
         self.is-resolved ?? self.resolution.can-be-bound-to !! False
     }

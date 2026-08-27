@@ -29,6 +29,22 @@ class RakuAST::Term::Name
         self.new(RakuAST::Name.from-identifier($name))
     }
 
+    # A reference to a once-bound value is pure: evaluating it is a
+    # lookup that runs no code. A stash reference is left out, since
+    # evaluating it takes the .WHO of the resolved package rather than
+    # the bound value. The pseudo-package bound matches the one
+    # has-compile-time-value applies, keeping out a name that compiles
+    # to a runtime symbolic lookup.
+    method pure() {
+        self.is-resolved
+          && self.IMPL-PURE-RESOLUTION(self.resolution)
+          && !$!name.is-package-lookup
+          && (!$!name.is-pseudo-package
+               || $!name.is-package-search
+                    && !$!name.without-first-part.is-global-lookup)
+            ?? True !! False
+    }
+
     # Folding must agree with IMPL-EXPR-QAST on which names may use their
     # resolution: only a leading-:: package search, and not ::GLOBAL.
     method has-compile-time-value() {

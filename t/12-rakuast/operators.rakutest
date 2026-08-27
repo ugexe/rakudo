@@ -1,7 +1,8 @@
 use v6.e.PREVIEW;
+use nqp;
 use Test;
 
-plan 30;
+plan 31;
 
 my $ast;
 my $deparsed;
@@ -431,6 +432,109 @@ for
             @b.splice;
         }
     }
+}
+
+subtest 'Purity of operator applications' => {
+    plan 41;
+
+    ok RakuAST::IntLiteral.new(42).pure,
+      'an integer literal is pure';
+    ok Q|"a b"|.AST(:expression).pure,
+      'an uninterpolated quoted string is pure';
+    nok Q|"a$_"|.AST(:expression).pure,
+      'an interpolating quoted string is not pure';
+    nok Q|qx/never-run-only-parsed/|.AST(:expression).pure,
+      'an exec processed string is not pure';
+    ok Q|1 + 2|.AST(:expression).pure,
+      'an infix with a pure routine and literal operands is pure';
+    ok Q|1 + 2 * 3|.AST(:expression).pure,
+      'purity composes through a pure operand';
+    nok Q|1 + 2 :x|.AST(:expression).pure,
+      'an infix carrying an adverb is not pure';
+    nok Q|1 xx 2|.AST(:expression).pure,
+      'an infix whose routine lacks is pure is not pure';
+    nok Q|$_ + 1|.AST(:expression).pure,
+      'a pure infix with an impure operand is not pure';
+    nok Q|"a" + 1|.AST(:expression).pure,
+      'an application whose evaluation returns a Failure is not pure';
+    ok Q|1 div 2|.AST(:expression).pure,
+      'an application whose evaluation succeeds is pure';
+    nok Q|1 div 0|.AST(:expression).pure,
+      'the same operator declines when its evaluation fails';
+    my $boom = Q|sub infix:<boom>($a,$b) is pure { die "kapow" }; 1 boom 2|;
+    nok $boom.AST.statements[1].expression.pure,
+      'an application whose evaluation dies is not pure';
+    my $calm = Q|sub infix:<calm>($a,$b) is pure { $a + $b }; 1 calm 2|;
+    ok $calm.AST.statements[1].expression.pure,
+      'a lexical pure infix with a surviving evaluation is pure';
+    nok Q|("a" + 1) + 2|.AST(:expression).pure,
+      'a nested operand whose evaluation fails declines the outer application';
+    my $pear = Q|sub infix:<pear>($a,$b) is pure { my $f = Failure.new; $f.Bool; ($f, $b) }; 1 pear 2|;
+    nok $pear.AST.statements[1].expression.pure,
+      'an application returning a Failure inside a list is not pure';
+    my $evil = Q|my class EvilFailure is Failure { method Bool() { die "evil" } }; sub infix:<evil>($a,$b) is pure { EvilFailure.new }; 1 evil 2|;
+    nok $evil.AST.statements[2].expression.pure,
+      'a Failure result whose Bool throws declines instead of escaping';
+    nok Q|1 < 2 < 2|.AST(:expression).pure,
+      'a chaining comparison is not pure';
+    ok Q|-5|.AST(:expression).pure,
+      'a prefix with a pure routine and a literal operand is pure';
+    nok Q|-$_|.AST(:expression).pure,
+      'a prefix with an impure operand is not pure';
+    nok Q|-"a"|.AST(:expression).pure,
+      'a prefix whose evaluation returns a Failure is not pure';
+    nok Q|-5 :x|.AST(:expression).pure,
+      'a prefix carrying an adverb is not pure';
+    nok Q|1, 2|.AST(:expression).pure,
+      'a list infix whose evaluation builds an Iterable is not pure';
+    nok Q|1, $_|.AST(:expression).pure,
+      'a list infix with an impure operand is not pure';
+    nok Q|1 R+ 2|.AST(:expression).pure,
+      'a meta operator application is not pure';
+    ok Q|(1 + 2)|.AST(:expression).pure,
+      'grouping parentheses around a pure expression are pure';
+    nok Q|(say 1)|.AST(:expression).pure,
+      'grouping parentheses around an impure expression are not pure';
+    nok Q|(1 if 1)|.AST(:expression).pure,
+      'parentheses around a modified statement are not pure';
+    ok Q|pi|.AST(:expression).pure,
+      'a reference to a constant declaration is pure';
+    ok Q|&say|.AST(:expression).pure,
+      'a reference to a setting symbol is pure';
+    ok Q|my constant x = 5; x|.AST.statements[1].expression.pure,
+      'a reference to a lexical constant is pure';
+    nok Q|CORE::|.AST(:expression).pure,
+      'a stash reference is not pure';
+    nok Q|$_|.AST(:expression).pure,
+      'a variable read is not pure';
+    nok Q|my $x; $x|.AST.statements[1].expression.pure,
+      'a my scoped variable read is not pure';
+    ok Q|say(:a, :a(1))|.AST(:expression).args.args[0].named-arg-value.pure,
+      'a bare colonpair named argument value is pure';
+    nok Q|say 42|.AST(:expression).pure,
+      'a call is not pure';
+    nok RakuAST::ApplyInfix.new(
+      left  => RakuAST::IntLiteral.new(1),
+      infix => RakuAST::Infix.new('+'),
+      right => RakuAST::IntLiteral.new(2)
+    ).pure, 'an unresolved infix is not pure';
+
+    my $side = 0;
+    my sub take-named(:$n) { $n }
+    is-deeply take-named(:n($side++), :n(2)), 2,
+      'the rightmost duplicate named argument wins';
+    is-deeply $side, 1,
+      'a discarded duplicate named argument still evaluates its side effect';
+
+    my $ran = 0;
+    my sub infix:<CNT>($a, $b) is pure { $ran++; 42 }
+    is-deeply take-named(:n(&say CNT 1), :n(99)), 99,
+      'the rightmost duplicate named argument wins for a pure value';
+    nqp::gethllsym('Raku', 'COMPILER-FRONTEND') eq 'rakuast'
+      ?? is-deeply($ran, 0,
+           'a discarded pure duplicate named argument is elided at runtime')
+      !! is-deeply($ran, 1,
+           'the legacy frontend evaluates the discarded pure duplicate');
 }
 
 # vim: expandtab shiftwidth=4

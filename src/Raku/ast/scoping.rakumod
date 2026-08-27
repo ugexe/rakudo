@@ -996,6 +996,9 @@ class RakuAST::Declaration::ResolvedConstant
 
     method return-type() { $!compile-time-value.WHAT }
 
+    # Compiles to its constant value, so evaluating it has no effect.
+    method pure() { True }
+
     method IMPL-TO-QAST(RakuAST::IMPL::QASTContext $context) {
         self.IMPL-LOOKUP-QAST($context)
     }

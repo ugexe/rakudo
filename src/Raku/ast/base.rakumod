@@ -3276,6 +3276,19 @@ class RakuAST::Node {
             ?? 1 !! 0
     }
 
+    # Whether evaluating a reference to a resolution has no effect:
+    # a constant declaration, or a setting symbol, either way bound once
+    # to a value held in no container, so the lookup runs no code.
+    # IMPL-CONSTANT-RESOLUTION further demands that the compile-time
+    # value be the value a reference evaluates to, which elision has no
+    # need of.
+    method IMPL-PURE-RESOLUTION(Mu $decl) {
+        return True if self.IMPL-CONSTANT-RESOLUTION($decl);
+        nqp::istype($decl, RakuAST::Declaration::External::Setting)
+          && !nqp::iscont($decl.compile-time-value)
+            ?? True !! False
+    }
+
     # Whether a branch can be removed from the tree. The running program would
     # not evaluate a dropped branch, so its runtime code is safe to remove, but
     # a declaration in it has a lexical effect that outlives the branch and must
@@ -3418,6 +3431,57 @@ class RakuAST::Node {
         }
         my $routine := $operator.resolution.compile-time-value;
         nqp::can($routine, 'is-pure') ?? 1 !! 0
+    }
+
+    # Whether an operator application's operator side is pure: a resolved
+    # simple operator whose routine carries the `is pure` trait. The
+    # operands and any adverb remain the application's own to judge.
+    method IMPL-PURE-OPERATOR(Mu $operator) {
+        (nqp::istype($operator, RakuAST::Infix)
+          || nqp::istype($operator, RakuAST::Prefix))
+          && $operator.is-resolved
+          && self.IMPL-PURE-ROUTINE($operator)
+            ?? True !! False
+    }
+
+    # The structural half of pure: the shape conditions with the trial
+    # evaluation left out. An application vets its operands with this,
+    # so one trial at the outermost application covers the whole tree
+    # rather than one per nesting level. Nodes whose purity needs no
+    # trial answer pure itself.
+    method IMPL-PURE-STRUCTURE() { self.pure }
+
+    # Whether a trial evaluation of this node, run now the way constant
+    # folding runs one, completes without incident. The trial executes
+    # the operator's routine at compile time, which the `is pure` trait
+    # licenses. The trait promises no side effects, not a result, so
+    # the routine may throw or hand back a Failure that raises its
+    # error where the value is used, and eliding either would swallow
+    # that error. Both decline, the Failure marked handled so the
+    # trial's own copy stays quiet. An Iterable result may hold such a
+    # Failure out of the verdict's sight, so it declines too. A trial
+    # that cannot be attempted, here or before the verdict types
+    # resolve during early bootstrap, also declines, keeping the
+    # application at runtime. That bound keeps every chaining and
+    # short-circuit operator at runtime, since neither interprets as
+    # the plain call a trial runs.
+    method IMPL-PURE-EVALUATION() {
+        CATCH {
+            return False;
+        }
+        return False unless self.IMPL-CAN-INTERPRET;
+        my $Failure := nqp::gethllsym('Raku', 'Failure');
+        my $Iterable := nqp::gethllsym('Raku', 'Iterable');
+        return False if nqp::isnull($Failure) || nqp::isnull($Iterable);
+        my @result := self.IMPL-CONSTANT-FOLD-EVALUATE(self);
+        return False unless nqp::atpos(@result, 0);
+        my $value := nqp::atpos(@result, 1);
+        if nqp::istype($value, $Failure) {
+            $value.Bool;
+            return False;
+        }
+        return False if nqp::istype($value, $Iterable);
+        True
     }
 
     # Whether an operator is pure. A pure operator has no effect, so the

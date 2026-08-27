@@ -75,6 +75,26 @@ class RakuAST::Circumfix::Parentheses
         $!semilist.has-compile-time-value;
     }
 
+    # Grouping parentheses around a single expression are transparent, so
+    # they are pure exactly when that expression is. A statement modifier
+    # makes the statement more than its expression, so it declines.
+    method IMPL-PURE-INNER-EXPRESSION() {
+        return Nil unless nqp::istype($!semilist, RakuAST::SemiList)
+            && $!semilist.IMPL-IS-SINGLE-EXPRESSION;
+        my $statement := $!semilist.IMPL-UNWRAP-LIST($!semilist.statements)[0];
+        nqp::isconcrete($statement.condition-modifier)
+          || nqp::isconcrete($statement.loop-modifier)
+            ?? Nil !! $statement.expression
+    }
+    method IMPL-PURE-STRUCTURE() {
+        my $expression := self.IMPL-PURE-INNER-EXPRESSION;
+        nqp::isconcrete($expression) ?? $expression.IMPL-PURE-STRUCTURE !! False
+    }
+    method pure() {
+        my $expression := self.IMPL-PURE-INNER-EXPRESSION;
+        nqp::isconcrete($expression) ?? $expression.pure !! False
+    }
+
     method maybe-compile-time-value() {
         $!semilist.maybe-compile-time-value;
     }

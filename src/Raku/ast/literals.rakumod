@@ -38,6 +38,7 @@ class RakuAST::Literal
 
     method expression() { self }
     method return-type() { $!value.WHAT }
+    method pure() { True }
     method native-type-flag() { Nil }
     method IMPL-NATIVE-LITERAL-KIND() { self.native-type-flag }
     method compile-time-value() { $!value }
@@ -602,6 +603,12 @@ class RakuAST::QuotedString
 
     method has-compile-time-value() {
         nqp::isconcrete(self.literal-value) ?? True !! False
+    }
+
+    # A quoted string whose value is known at compile time has nothing
+    # left to interpolate or run, so evaluating it has no effect.
+    method pure() {
+        self.has-compile-time-value
     }
 
     method maybe-compile-time-value() {
