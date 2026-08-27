@@ -3340,9 +3340,7 @@ class RakuAST::Node {
             # argument-position delivery below leaves the node in place, so
             # the enclosing chain can withdraw the answer and keep its
             # middle-operand sharing.
-            $foldable := nqp::istype($infix, RakuAST::Infix)
-                && $infix.is-resolved
-                && self.IMPL-PURE-ROUTINE($infix)
+            $foldable := self.IMPL-PURE-OPERATOR($infix)
                 && !nqp::isconcrete($expr.args.arg-at-pos(2))
                 && self.IMPL-FOLDABLE-OPERAND($expr.left)
                 && self.IMPL-FOLDABLE-OPERAND($expr.right);
@@ -3353,9 +3351,7 @@ class RakuAST::Node {
             # interpreter does not pass on, so an operator carrying one is left
             # for runtime. The infix case is covered by the arg-at-pos check
             # above, which sees the adverb as a further argument.
-            $foldable := nqp::istype($prefix, RakuAST::Prefix)
-                && $prefix.is-resolved
-                && self.IMPL-PURE-ROUTINE($prefix)
+            $foldable := self.IMPL-PURE-OPERATOR($prefix)
                 && nqp::elems($prefix.colonpairs) == 0
                 && self.IMPL-FOLDABLE-OPERAND($expr.operand);
         }
@@ -3367,8 +3363,7 @@ class RakuAST::Node {
             # program.
             if nqp::istype($infix, RakuAST::Infix)
               && $infix.operator ne ','
-              && $infix.is-resolved
-              && self.IMPL-PURE-ROUTINE($infix)
+              && self.IMPL-PURE-OPERATOR($infix)
               && !$infix.properties.chain
               && nqp::elems(nqp::getattr($expr, RakuAST::ApplyListInfix, '$!adverbs')) == 0 {
                 my @operands := self.IMPL-UNWRAP-LIST($expr.operands);
