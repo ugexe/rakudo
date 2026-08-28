@@ -349,6 +349,7 @@ sub MAIN(*@files) {
     }
     emit-nqp('src/Raku/ast/rakuast-epilogue.nqp');
     say('}');
+    emit-method-outer-sharing();
 }
 
 # Code-gen.
@@ -404,6 +405,23 @@ sub emit-package($package) {
     }
 
     say("    compose($name);");
+}
+
+# The methods installed by the BEGIN block are static code objects without
+# an outer of their own. On first invocation MoarVM closes such a code object
+# over a fresh copy of the BEGIN frame, and of the mainline frames under it,
+# so every method that runs would carry its own copy of those frames. The
+# probe recorded by the prologue hands out the frames it was closed over,
+# and every method is then closed over that one set.
+sub emit-method-outer-sharing() {
+    say('');
+    say('{');
+    say("    my \@codes := RakuAST.WHO<IMPL>.WHO<method-codes>;");
+    say('    my $outer := @codes[0]();');
+    say('    for @codes {');
+    say('        nqp::forceouterctx($_, $outer);');
+    say('    }');
+    say('}');
 }
 
 sub emit-method($package, $method) {

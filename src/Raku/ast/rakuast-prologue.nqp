@@ -12,6 +12,11 @@
         ));
     }
 
+    # Every method installed below is a static code object. The mainline
+    # closes them all over the same BEGIN frame at load time: slot 0 holds
+    # the probe that hands out that frame, the rest is every method's code.
+    my @method-codes := [nqp::getstaticcode(sub () { nqp::ctxouter(nqp::ctx()) })];
+
     sub add-method($class, $name, @parameters, $impl) {
         # Assemble a signature object for introspection purposes.
         my @params;
@@ -36,6 +41,7 @@
 
         # Wrap code up in a Method object.
         my $static-code := nqp::getstaticcode($impl);
+        nqp::push(@method-codes, $static-code);
         my $wrapper := nqp::create(Method);
         nqp::bindattr($wrapper, Code, '$!do', $static-code);
         nqp::bindattr($wrapper, Code, '$!signature', $signature);
