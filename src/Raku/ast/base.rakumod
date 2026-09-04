@@ -759,6 +759,26 @@ class RakuAST::Node {
         Nil
     }
 
+    # The native type this node is known to read from, or null. A native
+    # variable holds no object, so a read of one boxes to the type its kind
+    # boxes to and never to a subclass of it, and no bind can replace the
+    # slot. A my declaration and a parameter read from that slot, or through
+    # a reference to it for an rw parameter, while an our declaration reads
+    # through its package.
+    method IMPL-NATIVE-SOURCE-TYPE() {
+        return nqp::null() unless nqp::istype(self, RakuAST::Var::Lexical) && self.is-resolved;
+        my $decl := self.resolution;
+        if nqp::istype($decl, RakuAST::ParameterTarget::Var) {
+            $decl := $decl.declaration;
+            return nqp::null() unless nqp::isconcrete($decl);
+        }
+        return nqp::null() unless nqp::istype($decl, RakuAST::VarDeclaration::Simple)
+            && $decl.sigil eq '$'
+            && $decl.scope eq 'my';
+        my $type := $decl.return-type;
+        nqp::objprimspec($type) ?? $type !! nqp::null()
+    }
+
     # Optimize a child expression, returning a node to use in its place (the
     # same node if nothing applies). The optimize walk offers every visited
     # child to this method, and this is where the expression-level

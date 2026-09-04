@@ -1592,15 +1592,28 @@ class RakuAST::VarDeclaration::Simple
         return Nil unless nqp::istype($vartype, $resolver.type-from-setting('Cool'));
 
         my $iterable := $resolver.type-from-setting('Iterable');
-        for self.IMPL-STORED-VALUES($expression) {
+        for self.IMPL-STORED-VALUES($expression) -> @stored {
+            my $value := @stored[0];
+            # A native item variable given a native value converts between the
+            # two kinds rather than unboxing, so a read of a native variable
+            # stores into one whatever its kind. A native element still has to
+            # unbox what it is given.
+            next if $primspec && self.sigil eq '$' && nqp::isconcrete(@stored[1]);
             # An iterable value may be spread across several stores rather
             # than stored whole, so what the value type sees is not settled
             # here.
-            next if nqp::istype($_, $iterable);
-            unless nqp::istype($_, $vartype) {
-                return $resolver.build-exception('X::Syntax::Number::LiteralType',
-                    :varname(self.name), :vartype($declared), :value($_),
-                    :native($primspec));
+            next if nqp::istype($value, $iterable);
+            unless nqp::istype($value, $vartype) {
+                my $source := @stored[1];
+                return nqp::isconcrete($source)
+                    ?? $resolver.build-exception('X::Syntax::Variable::NativeSource',
+                        :varname(self.name), :vartype($declared),
+                        :source($source.name),
+                        :sourcetype($source.IMPL-NATIVE-SOURCE-TYPE),
+                        :native($primspec))
+                    !! $resolver.build-exception('X::Syntax::Number::LiteralType',
+                        :varname(self.name), :vartype($declared), :value($value),
+                        :native($primspec));
             }
         }
         Nil
@@ -1615,8 +1628,10 @@ class RakuAST::VarDeclaration::Simple
         False
     }
 
-    # The values an expression is known to store into the variable. An operand
-    # producing something the compiler cannot name contributes nothing.
+    # The values an expression is known to store into the variable, each
+    # paired with the native variable it is read from, or with Nil for a value
+    # the compiler holds. An operand producing something the compiler cannot
+    # name contributes nothing.
     method IMPL-STORED-VALUES(Mu $expression) {
         my @values;
         self.IMPL-COLLECT-STORED-VALUES($expression, @values, self.sigil eq '@');
@@ -1672,11 +1687,20 @@ class RakuAST::VarDeclaration::Simple
           && nqp::isconcrete($value) && nqp::istype($value, List)
         {
             for self.IMPL-UNWRAP-LIST($value) {
-                nqp::push($values, $_);
+                nqp::push($values, [$_, Nil]);
             }
             return Nil;
         }
-        nqp::push($values, $value) if nqp::isconcrete($value);
+        if nqp::isconcrete($value) {
+            nqp::push($values, [$value, Nil]);
+        }
+        else {
+            # A read of a native variable produces a box of exactly its native
+            # type, so that type stands in for the value the store sees.
+            my $native := $expression.IMPL-NATIVE-SOURCE-TYPE;
+            nqp::push($values, [$native.HOW.mro($native)[1], $expression])
+                unless nqp::isnull($native);
+        }
         Nil
     }
 

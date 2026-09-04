@@ -3162,6 +3162,45 @@ my class X::Syntax::Number::LiteralType is X::TypeCheck::Assignment does X::Synt
         "$val.".naive-word-wrapper
     }
 }
+# A native variable holds a value of exactly the type its native kind boxes
+# to, so a read of one is as settled as a literal.
+my class X::Syntax::Variable::NativeSource is X::TypeCheck::Assignment does X::Syntax {
+    has $.varname;
+    # Bound rather than assigned, so that a variable declared Nil keeps Nil as
+    # its type here instead of resetting to the default.
+    has $.vartype is built(:bind);
+    # The variable read from and the native type it was declared with.
+    has $.source;
+    has $.sourcetype is built(:bind);
+    has $.native;
+    has $.suggestiontype = (try ($!vartype, $!sourcetype.^mro[1]).are.^name) // 'Any';
+
+    # Anything handling an assignment type check reads the value, the type it
+    # was checked against and the variable it was going to under the names the
+    # parent gives them. The value is any box of the native type, so its boxed
+    # type stands in.
+    submethod TWEAK() {
+        nqp::bindattr(self, X::TypeCheck, '$!got', $!sourcetype.^mro[1]);
+        nqp::bindattr(self, X::TypeCheck, '$!expected', $!vartype);
+        nqp::bindattr(self, X::TypeCheck::Assignment, '$!symbol', $!varname);
+    }
+
+    method message() {
+        my $vartype := $!vartype.WHAT.^name;
+        # A native unboxes from a boxed type, and that is the type a coercion
+        # names. The variable is still of the type it was declared with.
+        my $conversionmethod := ($.native ?? $!vartype.^mro[1].^name !! $vartype).tc;
+        my $val = "Cannot assign a native variable ($.source) of type $!sourcetype.^name() to
+        a { "native" if $.native } variable ($.varname) of type $vartype. You can declare
+        the variable to be of type $.suggestiontype";
+        # A type the value has no coercion method for is one there is no way to
+        # spell the conversion to, so only a value that can name it is advised.
+        $val ~= ", or try to coerce the
+        value with $.source.$conversionmethod or $conversionmethod\($.source\)"
+            if $!sourcetype.^mro[1].^can($conversionmethod);
+        "$val.".naive-word-wrapper
+    }
+}
 my class X::TypeCheck::Argument is X::TypeCheck {
     has $.protoguilt;
     has @.arguments;

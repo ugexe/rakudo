@@ -3,7 +3,7 @@ use Test;
 use nqp;
 use Test::Helpers;
 
-plan 33;
+plan 34;
 
 subtest '.map does not explode in optimizer' => {
     plan 3;
@@ -777,6 +777,98 @@ subtest 'a store the compiler cannot judge is left to the run time check' => {
 
     lives-ok { EVAL ｢use TypedExports; $count = 43.5; @names = 1, 2｣ },
         'an imported symbol answers the type of a value, not of its container';
+}
+
+# vim: expandtab shiftwidth=4
+
+subtest 'a read of a native variable is judged like a literal' => {
+    plan 19;
+
+    my &at-run-time = { not .contains('Cannot assign a native variable') };
+
+    if nqp::gethllsym('Raku', 'COMPILER-FRONTEND') eq 'rakuast' {
+        throws-like ｢my int $i = 1; my Str $s = $i｣,
+            X::Syntax::Variable::NativeSource,
+            message => *.contains('($i) of type int' & 'type Str'),
+            'a native int boxes to an Int, which a Str variable can never accept';
+
+        throws-like ｢my str $s = "x"; my Int $i = $s｣,
+            X::Syntax::Variable::NativeSource,
+            message => *.contains('($s) of type str' & 'type Int'),
+            'a native str boxes to a Str, which an Int variable can never accept';
+
+        throws-like ｢my int $i = 1; my Str @a = $i｣,
+            X::Syntax::Variable::NativeSource,
+            message => *.contains('(@a)' & 'type Str'),
+            'a list variable checks the read against its element type';
+
+        throws-like ｢my num $n = 1e0; my Int @a = 1, $n｣,
+            X::Syntax::Variable::NativeSource,
+            message => *.contains('($n) of type num'),
+            'a read later in a list is reported once the earlier elements are accepted';
+
+        throws-like ｢sub f(int $i) { my Str $s = $i }｣,
+            X::Syntax::Variable::NativeSource,
+            'a native parameter reads from a native slot';
+
+        throws-like ｢sub f(int $i is rw) { my Str $s = $i }｣,
+            X::Syntax::Variable::NativeSource,
+            'an rw native parameter reads through a reference to a native slot';
+
+        throws-like ｢my int8 $i = 1; my Str $s = $i｣,
+            X::Syntax::Variable::NativeSource,
+            message => *.contains('of type int8'),
+            'a sized native names the type it was declared with';
+
+        throws-like ｢my str $s = "3"; my int @a = $s｣,
+            X::Syntax::Variable::NativeSource,
+            message => *.contains('native variable' & '(@a) of type int'),
+            'a native element still has to unbox what it is given';
+
+        throws-like ｢my int $i = 1; my Str $s; $s = $i｣,
+            X::Syntax::Variable::NativeSource,
+            'a later assignment is judged like the initializer';
+
+        throws-like ｢my int $i = 1; my Str $s = ($i)｣,
+            X::Syntax::Variable::NativeSource,
+            'grouping parentheses are looked through';
+
+        throws-like ｢my int $i = 1; my $c = { my Str $s = $i }｣,
+            X::Syntax::Variable::NativeSource,
+            'a read from an outer scope is judged too';
+
+        throws-like ｢my int $i = 1; my Str $s = $i｣,
+            X::Syntax::Variable::NativeSource,
+            got => Int, expected => Str, symbol => '$s',
+            'the exception answers the names the assignment type check gives';
+    }
+    else {
+        skip 'a native read is judged by the RakuAST frontend', 12;
+    }
+
+    lives-ok { EVAL ｢my int $i = 1; my Int $x = $i; my Cool $c = $i; my Numeric $n = $i｣ },
+        'a boxed native satisfies every type its box does';
+
+    lives-ok { EVAL ｢my int $i = 1; my str $s = $i｣ },
+        'a native item variable converts an int to a str rather than unboxing';
+
+    lives-ok { EVAL ｢my num $n = 1.5e0; my int $i = $n｣ },
+        'a native item variable converts a num to an int rather than unboxing';
+
+    lives-ok { EVAL ｢sub f(::T $t) { my Str $s = $t }｣ },
+        'a generic parameter is settled later';
+
+    throws-like ｢my Int $i = 1; my Str $s = $i｣,
+        X::TypeCheck, :message(&at-run-time),
+        'an object variable may hold a subclass of its type, so its read is left to the run time check';
+
+    throws-like ｢my int $i = 1; my Version $v = $i｣,
+        X::TypeCheck, :message(&at-run-time),
+        'a type that is not Cool has no coercion advice to give';
+
+    throws-like ｢my int @a = 1; my Str $s = @a｣,
+        X::TypeCheck, :message(&at-run-time),
+        'a native array reads as the array rather than as an element';
 }
 
 # vim: expandtab shiftwidth=4
