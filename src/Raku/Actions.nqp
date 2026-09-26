@@ -3558,16 +3558,17 @@ class Raku::Actions is HLL::Actions does Raku::CommonActions {
             if $scope eq 'my' || $scope eq 'state' || $scope eq 'our' {
                 my $prev := $*R.declare-lexical($decl);
                 if $prev {
-                    # The setting declares $_, $/ and $! itself for the legacy
-                    # frontend, which does not provide them. Here they are
-                    # already implicit.
-                    my $shadows-implicit := $*COMPILING_CORE_SETTING
-                      && nqp::istype($prev, Nodify('VarDeclaration::Implicit::Special'));
                     # An implicit the scope gives up to a declaration of its
                     # name is no prior declaration of it.
                     my $gives-way := nqp::istype($prev, Nodify('VarDeclaration::Implicit'))
                       && !$prev.report-redeclaration;
-                    unless $shadows-implicit || $gives-way {
+                    # A declaration of the topic, match or error variable
+                    # takes the slot the scope declares for it, and shadows
+                    # it as a declaration in an inner scope would.
+                    my $takes-implicit := nqp::istype($prev, Nodify('VarDeclaration::Implicit'))
+                      && ($name eq '$_' || $name eq '$/' || $name eq '$!')
+                      && $decl.claim-implicit;
+                    unless $takes-implicit || $gives-way {
                         $*R.find-scope-property(-> $scope { $scope.fatal })
                           ?? $/.typed-sorry('X::Redeclaration', :symbol($name))
                           !! $/.typed-worry('X::Redeclaration', :symbol($name));

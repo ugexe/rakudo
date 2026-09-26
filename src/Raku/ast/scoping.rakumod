@@ -222,7 +222,7 @@ role RakuAST::LexicalScope
                                     nqp::push(@declarations, $decl);
                                     nqp::push(@variables, $decl);
                                     %declarations-seen{nqp::objectid($decl)} := 1;
-                                    %implicit{$decl.lexical-name} := 1
+                                    %implicit{$decl.lexical-name} := $decl
                                       if nqp::istype($decl, RakuAST::VarDeclaration::Implicit);
                                 }
                             }
@@ -239,7 +239,9 @@ role RakuAST::LexicalScope
                 my str $name := $decl.lexical-name;
                 for @declarations {
                     if $_.lexical-name eq $name && !($_ =:= $decl) {
-                        $found := 1;
+                        # A declaration that can take the lexical keeps it
+                        # declared, and any other takes its place.
+                        $found := 1 unless $_.claim-implicit;
                         last;
                     }
                 }
@@ -259,11 +261,21 @@ role RakuAST::LexicalScope
                     }
                 }
             }
-            # A declaration of a name the scope declares for itself, such as
-            # the topic, names that lexical rather than making one of its own.
+            # The first declaration of a name the scope declares for itself,
+            # such as the topic, takes that lexical rather than making one of
+            # its own, and a later one is a redeclaration of the first.
             if %implicit {
+                my %claimed;
                 for @declarations {
-                    $_.claim-implicit if nqp::existskey(%implicit, $_.lexical-name);
+                    my str $name := $_.lexical-name;
+                    if nqp::existskey(%implicit, $name) {
+                        if nqp::existskey(%claimed, $name) {
+                            $_.set-already-declared if nqp::can($_, 'set-already-declared');
+                        }
+                        elsif $_.claim-implicit {
+                            %claimed{$name} := 1;
+                        }
+                    }
                 }
             }
             nqp::bindattr(self, RakuAST::LexicalScope, '$!declarations-cache', @declarations);
@@ -435,6 +447,13 @@ role RakuAST::LexicalScope
                           if nqp::can($_, 'set-replace-stub') && $_.multiness ne 'multi';
                         %lookup{$lexical-name} := $_;
                     }
+                    # A declaration that takes the slot the scope made
+                    # shadows the scope's lexical as one in an inner scope
+                    # would, so it is not a redeclaration.
+                    elsif nqp::istype($prev, RakuAST::VarDeclaration::Implicit)
+                      && $_.takes-implicit {
+                        %lookup{$lexical-name} := $_;
+                    }
                     # The lexicals a scope declares for itself are not in
                     # scope as its body is parsed, so the parser cannot
                     # report a redeclaration of one and this does.
@@ -451,12 +470,10 @@ role RakuAST::LexicalScope
                         # A declaration that cannot name the lexical takes
                         # it, and the scope gives its own up. A block cannot
                         # give up a topic it takes as a parameter.
-                        my int $refused := !$_.shares-implicit
-                          && nqp::istype($prev,
+                        my int $refused := nqp::istype($prev,
                                RakuAST::VarDeclaration::Implicit::BlockTopic)
                           && ($prev.parameter || $prev.exception);
-                        $prev.IMPL-SET-UNUSED
-                          if !$_.shares-implicit && !$refused;
+                        $prev.IMPL-SET-UNUSED unless $refused;
                         if $fatal || $refused {
                             $_.add-sorry($exception);
                         }
@@ -542,7 +559,7 @@ role RakuAST::LexicalScope
                 # A lexical the scope makes exists from its entry, so a use
                 # above a declaration that names it is not a use before it.
                 %declarations{$var.lexical-name} := $var
-                  if $var.report-redeclaration && !$var.shares-implicit;
+                  if $var.report-redeclaration && !$var.takes-implicit;
             }
             else {
                 if $var.is-resolved && nqp::existskey(%declarations, $var.name) {
@@ -880,13 +897,13 @@ role RakuAST::Declaration {
         True
     }
 
-    # Whether the declaration names a lexical that an implicit declaration of
+    # Whether the declaration takes a lexical that an implicit declaration of
     # its scope already makes, rather than declaring one of its own.
-    method shares-implicit() { False }
+    method takes-implicit() { False }
 
     # Offer the declaration that lexical. Most kinds of declaration have no
-    # say, and one that needs a container of its own declines.
-    method claim-implicit() { Nil }
+    # say, and one that needs a slot of its own declines.
+    method claim-implicit() { False }
 
     method declaration-kind() {
         'symbol'

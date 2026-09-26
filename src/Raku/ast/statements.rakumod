@@ -1240,7 +1240,42 @@ class RakuAST::Statement::Expression
                 :block(nqp::istype(self.expression, RakuAST::Block)),
                 :expression($!expression));
         }
-        $qast
+        self.IMPL-TOPIC-PUT-BACK-QAST($context, $qast)
+    }
+
+    # A topic declaration under a modifier, a smartmatch or a thunk of the
+    # statement gives its slot a container in a frame or a binding the
+    # statement undoes, so the statement binds the slot to it again after.
+    method IMPL-TOPIC-PUT-BACK-QAST(RakuAST::IMPL::QASTContext $context, Mu $qast) {
+        my @declarations;
+        my int $modified := nqp::isconcrete($!condition-modifier) || nqp::isconcrete($!loop-modifier);
+        my $collect := -> $node {
+            nqp::push(@declarations, $node)
+                if nqp::istype($node, RakuAST::VarDeclaration::Simple)
+                && ($modified || !nqp::eqaddr($node, $!expression))
+                && $node.IMPL-TOPIC-DECLARATION && !$node.IMPL-FRAMELESS;
+            !nqp::istype($node, RakuAST::LexicalScope)
+        };
+        $!expression.visit-dfs($collect);
+        $!condition-modifier.expression.visit-dfs($collect) if nqp::isconcrete($!condition-modifier);
+        $!loop-modifier.expression.visit-dfs($collect) if nqp::isconcrete($!loop-modifier);
+        return $qast unless @declarations;
+        my $before := QAST::Stmts.new;
+        my $after := QAST::Stmt.new( :resultchild(0), $qast );
+        for @declarations {
+            my $container := $_.IMPL-TOPIC-PROTOTYPE;
+            $context.ensure-sc($container);
+            my $holder := QAST::Var.new( :name($_.IMPL-TOPIC-LEXICAL-NAME), :scope('lexical') );
+            $before.push(QAST::Op.new( :op('bind'), $holder, QAST::WVal.new( :value($container) ) ));
+            $after.push(QAST::Op.new(
+                :op('unless'),
+                QAST::Op.new( :op('eqaddr'), $holder, QAST::WVal.new( :value($container) ) ),
+                QAST::Op.new( :op('bind'),
+                    QAST::Var.new( :name($_.lexical-name), :scope('lexical') ), $holder )
+            ));
+        }
+        $before.push($after);
+        $before
     }
 
     # StatementModifier::WhileUntil needs us to thunk loop-condition, condition-modifier and expression

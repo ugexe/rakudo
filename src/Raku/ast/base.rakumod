@@ -695,10 +695,18 @@ class RakuAST::Node {
         }
     }
 
+    # The new topic is evaluated before the slot is saved, so a topic
+    # declaration inside it is what the restore puts back.
     method IMPL-TEMPORARIZE-TOPIC(Mu $new-topic-qast, Mu $with-topic-qast) {
         my $temporary := QAST::Node.unique('save_topic');
+        my $new-topic := QAST::Node.unique('new_topic');
         QAST::Stmt.new(
-            :resultchild(2),
+            :resultchild(3),
+            QAST::Op.new(
+                :op('bind'),
+                QAST::Var.new( :name($new-topic), :scope('local'), :decl('var') ),
+                $new-topic-qast
+            ),
             QAST::Op.new(
                 :op('bind'),
                 QAST::Var.new( :name($temporary), :scope('local'), :decl('var') ),
@@ -707,7 +715,7 @@ class RakuAST::Node {
             QAST::Op.new(
                 :op('bind'),
                 QAST::Var.new( :name('$_'), :scope('lexical') ),
-                $new-topic-qast
+                QAST::Var.new( :name($new-topic), :scope('local') )
             ),
             $with-topic-qast,
             QAST::Op.new(
@@ -4385,12 +4393,16 @@ class RakuAST::Node {
     }
 
     # The declarations under this node a scope outside its frame can own,
-    # along with the list declarations whose implicit declarations it can,
-    # leaving out the topic, a nested scope's own, and a bound list.
+    # with the list declarations whose implicits it can, leaving out a
+    # nested scope's own, a bound list, and a code node's own parameters.
     method IMPL-HOISTABLE-DECLARATIONS() {
         my @hoistable;
+        my $parameters := nqp::istype(self, RakuAST::Code) ?? self.signature !! Mu;
         self.visit-dfs: -> $node {
-            if nqp::istype($node, RakuAST::StatementPrefix::Phaser::HoistsStatement)
+            if nqp::isconcrete($parameters) && nqp::eqaddr($node, $parameters) {
+                0
+            }
+            elsif nqp::istype($node, RakuAST::StatementPrefix::Phaser::HoistsStatement)
               && nqp::isconcrete($node.IMPL-HOISTED-STATEMENT) {
                 for $node.IMPL-HOISTED-STATEMENT.IMPL-HOISTABLE-DECLARATIONS {
                     nqp::push(@hoistable, $_);
@@ -4406,7 +4418,9 @@ class RakuAST::Node {
                 if nqp::istype($node, RakuAST::Declaration)
                   && !nqp::istype($node, RakuAST::VarDeclaration::Implicit) {
                     if $node.is-simple-lexical-declaration {
-                        nqp::push(@hoistable, $node) if $node.lexical-name ne '$_';
+                        nqp::push(@hoistable, $node)
+                            unless nqp::isconcrete($parameters)
+                              && self.IMPL-HAS-PARAMETER($node.lexical-name);
                     }
                     elsif nqp::istype($node, RakuAST::ImplicitDeclarations)
                       && !nqp::istype($node, RakuAST::LexicalScope) {

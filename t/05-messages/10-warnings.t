@@ -132,11 +132,11 @@ is-run ｢print do given 5 { when 5 { 42; 43 } }｣,
     :out<43>,
     :err{ .contains('constant integer 42') && !.contains('constant integer 43') };
 
-is-run ｢my $_; class A { }; class B { }; print "ran"｣,
+is-run ｢my $r; my $r; class A { }; class B { }; print "ran"｣,
     'a worry followed by package declarations is printed once',
     :out<ran>, :err{ .comb('Potential difficulties').elems == 1 && .comb('Redeclaration').elems == 1 };
 
-is-run ｢my $_; my Int:X $x; class B { }; class C { }; BEGIN note "later"; print "ran"｣,
+is-run ｢my $r; my $r; my Int:X $x; class B { }; class C { }; BEGIN note "later"; print "ran"｣,
     'an error known at a package declaration is thrown there with the earlier worry inside it once',
     :out(''), :exitcode(1),
     :err{ !.contains('later')
@@ -144,7 +144,7 @@ is-run ｢my $_; my Int:X $x; class B { }; class C { }; BEGIN note "later"; prin
         && .comb('potential difficulties').elems == 1
         && .comb('Redeclaration').elems == 1 };
 
-is-run ｢my $_; class A { }; foo()｣,
+is-run ｢my $r; my $r; class A { }; foo()｣,
     'a worry before a package declaration survives an error at the end of the unit',
     :exitcode(1),
     :err{ .comb('Redeclaration').elems == 1 && .contains('Undeclared routine') };

@@ -497,7 +497,7 @@ class RakuAST::IMPL::VarLowering {
             # A declaration that names the scope's own lexical rather than
             # making one is a use of that lexical.
             self.IMPL-MARK-MAGICAL-USED($node.name)
-                if $node.already-declared || $node.shares-implicit;
+                if $node.already-declared || $node.takes-implicit;
             self.IMPL-REGISTER-DECL($node)
                 unless nqp::getattr($node, RakuAST::VarDeclaration::Simple, '$!is-parameter');
         }

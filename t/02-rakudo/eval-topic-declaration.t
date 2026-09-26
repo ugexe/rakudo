@@ -3,7 +3,7 @@ use nqp;
 use Test;
 use Test::Helpers;
 
-plan 16;
+plan 17;
 
 # A scope whose topic is bound from the enclosing scope, such as an EVAL
 # unit or a for loop body with a signature, gives that topic up to a
@@ -69,11 +69,13 @@ if $rakuast {
     is-run '$_ = 1; EVAL q[my $_ = 6]; print $_', :out<1>, :err(''),
       'a my $_ inside an EVAL is not reported as a redeclaration';
 
-    throws-like { EVAL '$_ = 3; my $_ = 6' }, X::Redeclaration::Outer,
-      'a use of $_ above a my $_ inside an EVAL is an error as for any lexical';
+    is EVAL('$_ = 3; my $_ = 6; $_'), 6,
+      'a my $_ below a write to the topic inside an EVAL is a container of the EVAL';
+    is $_, 3,
+      'a write to the topic above a my $_ inside an EVAL reaches the topic outside';
 }
 else {
-    skip 'the legacy frontend keeps the topic of the code around an EVAL', 8;
+    skip 'the legacy frontend keeps the topic of the code around an EVAL', 9;
 }
 
 # vim: expandtab shiftwidth=4

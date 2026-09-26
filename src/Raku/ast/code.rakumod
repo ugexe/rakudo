@@ -256,6 +256,10 @@ role RakuAST::Code
         return $carrier.IMPL-QAST-BLOCK($context, :$blocktype, :$expression)
           unless nqp::eqaddr($carrier, self);
         unless ($!qast-block) {
+            # The declarations are gathered ahead of the body, as the check
+            # phase does, so a declaration that takes a slot the scope makes
+            # knows so before its statement compiles.
+            self.ast-lexical-declarations if nqp::istype(self, RakuAST::LexicalScope);
             self.IMPL-FINISH-CODE-OBJECT($context, :$blocktype, :$expression);
         }
         self.IMPL-MAYBE-REBUILD-BEGIN-TIME-CACHED-BLOCK($context);

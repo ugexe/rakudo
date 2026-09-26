@@ -174,10 +174,11 @@ throws-like q:to/CODE/, X::Redeclaration::Outer,
 
 is (try EVAL q:to/CODE/),
     $_ = 'outer';
-    -> { POST my $_ := True; $_ }()
+    -> { POST my $_ = True; $_ = 1 }();
+    $_
     CODE
     'outer',
-    'a topic declared by POST stays in the POST condition';
+    'a topic declared by POST is the block\'s own, so the block writes nothing outside';
 
 is (try EVAL q:to/CODE/),
     sub f() { my &x = &foo; POST sub foo() { 1 }; x() }

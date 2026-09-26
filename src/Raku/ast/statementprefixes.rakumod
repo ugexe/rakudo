@@ -649,6 +649,21 @@ class RakuAST::StatementPrefix::Phaser
   is RakuAST::StatementPrefix {
     method dump-markers() { '🛸' }
 
+    # A phaser run ahead of any frame of its scope runs a statement's
+    # topic, match and error declarations with no slot of the scope to
+    # give a container to, so they assign through the name instead.
+    method IMPL-MARK-FRAMELESS-TOPIC-DECLARATIONS() {
+        self.blorst.visit-dfs(-> $node {
+            $node.IMPL-SET-FRAMELESS
+                if nqp::istype($node, RakuAST::VarDeclaration::Simple)
+                && $node.scope eq 'my'
+                && ($node.lexical-name eq '$_' || $node.lexical-name eq '$/'
+                    || $node.lexical-name eq '$!');
+            !nqp::istype($node, RakuAST::LexicalScope)
+        });
+        Nil
+    }
+
     method PERFORM-CHECK(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
         # Avoid worries about sink context
     }
@@ -689,6 +704,7 @@ class RakuAST::StatementPrefix::Phaser::Begin
 
     # Perform BEGIN-time evaluation.
     method PERFORM-BEGIN(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
+        self.IMPL-MARK-FRAMELESS-TOPIC-DECLARATIONS;
         self.IMPL-STUB-CODE($resolver, $context);
 
         self.blorst.propagate-sink(False) if nqp::istype(self.blorst, RakuAST::Block);
@@ -754,6 +770,7 @@ class RakuAST::StatementPrefix::Phaser::Check
     }
 
     method PERFORM-BEGIN(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
+        self.IMPL-MARK-FRAMELESS-TOPIC-DECLARATIONS;
         self.IMPL-STUB-CODE($resolver, $context);
         $resolver.find-attach-target('compunit').add-check-phaser(self);
         Nil
@@ -790,6 +807,7 @@ class RakuAST::StatementPrefix::Phaser::Init
     }
 
     method PERFORM-BEGIN(RakuAST::Resolver $resolver, RakuAST::IMPL::QASTContext $context) {
+        self.IMPL-MARK-FRAMELESS-TOPIC-DECLARATIONS;
         $resolver.find-attach-target('compunit').add-init-phaser(self);
         self.IMPL-STUB-CODE($resolver, $context);
     }
@@ -1028,8 +1046,13 @@ class RakuAST::StatementPrefix::Phaser::First
             $origin := RakuAST::Origin.new(:from($origin.from), :to($origin.to),
                 :nestings([]), :source($origin.source));
         }
+        # A block made around the statement is no block of the program,
+        # so it takes no topic or match variable of its own, and the
+        # statement reaches those of the scope the FIRST is written in.
         my $as-block := -> $statement {
             my $block := $statement.as-block;
+            $block.set-implicit-topic(False);
+            $block.set-no-implicit-match;
             if nqp::isconcrete($origin) {
                 $statement.set-origin($origin) unless nqp::isconcrete($statement.origin);
                 $block.set-origin($origin);

@@ -773,7 +773,15 @@ class RakuAST::VarDeclaration::Simple
     has Bool                 $.is-ro;
     has Bool                 $!is-bindable;
     has Bool                 $!already-declared;
-    has Bool                 $!shares-implicit;
+    has Bool                 $!takes-implicit;
+    # The lexical of the scope that holds the container a topic
+    # declaration gives its slot, reached by name from wherever it runs.
+    has str                  $!topic-lexical-name;
+
+    # Set on a declaration a BEGIN, CHECK or INIT runs ahead of any frame
+    # of its scope. It then assigns through the name, as any assignment
+    # run then does.
+    has int                  $!frameless;
     has RakuAST::Code        $!block;
     has RakuAST::Package     $!unit-package;
 
@@ -839,7 +847,8 @@ class RakuAST::VarDeclaration::Simple
         return '' unless $!lowered-to-local;
         return '' if nqp::isnull($!lowered-away-sentinel);
         return '' if $!already-declared
-            || $!shares-implicit
+            || $!takes-implicit
+            || self.IMPL-TOPIC-DECLARATION
             || self.scope ne 'my'
             || $!desigilname.is-multi-part
             || self.IMPL-HAS-EXPLICIT-CONTAINER-BASE-TYPE;
@@ -998,27 +1007,83 @@ class RakuAST::VarDeclaration::Simple
     }
     method already-declared() { $!already-declared ?? True !! False }
 
-    # Name the lexical the scope already makes, such as a block's topic. The
-    # declaration then declares nothing of its own, and an `our` binds that
-    # lexical to the package container it installs.
+    # Take the slot of a lexical the scope declares itself, such as its
+    # topic. The scope keeps declaring the slot, and the declaration gives
+    # it a container of its own where it runs.
     method claim-implicit() {
-        nqp::bindattr(self, RakuAST::VarDeclaration::Simple, '$!shares-implicit', True)
-          if self.IMPL-CAN-SHARE-IMPLICIT;
+        return False unless self.IMPL-CAN-TAKE-IMPLICIT;
+        nqp::bindattr(self, RakuAST::VarDeclaration::Simple, '$!takes-implicit', True);
+        True
+    }
+
+    method takes-implicit() { $!takes-implicit ?? True !! False }
+
+    method IMPL-SET-FRAMELESS() {
+        nqp::bindattr_i(self, RakuAST::VarDeclaration::Simple, '$!frameless', 1);
         Nil
     }
 
-    method shares-implicit() { $!shares-implicit ?? True !! False }
+    method IMPL-FRAMELESS() { $!frameless }
 
-    # Whether the declaration can name a lexical the scope already made. One
-    # that asks for a container of its own cannot: that lexical is the
-    # scope's, shaped before the declaration runs.
-    method IMPL-CAN-SHARE-IMPLICIT() {
+    # Whether the declaration shapes its container itself, through a type,
+    # a shape, a where, a trait or a dynamic-scope pragma.
+    method IMPL-ASKS-FOR-CONTAINER() {
+        $!type || $!shape || $!where || self.forced-dynamic
+          || nqp::elems(self.IMPL-UNWRAP-LIST(self.traits))
+    }
+
+    # Whether the declaration can take a lexical the scope already made.
+    # Only a scalar with a container can, so a native scalar, an aggregate,
+    # a signature target and a `state` each bind a slot of their own.
+    method IMPL-CAN-TAKE-IMPLICIT() {
         my str $scope := self.scope;
         return False unless $scope eq 'my' || $scope eq 'our';
-        return False if $!is-parameter || $!type || $!shape || $!where;
-        return False if self.forced-dynamic;
-        return False if nqp::elems(self.IMPL-UNWRAP-LIST(self.traits));
+        return False if $!is-parameter || self.sigil ne '$';
+        return False if $!type
+          && (!nqp::istype($!type, RakuAST::Lookup) || $!type.is-resolved)
+          && nqp::objprimspec(self.IMPL-OF-TYPE);
         True
+    }
+
+    # Whether the declaration is a `my` of the topic, match or error
+    # variable that gives its slot a container. A native slot holds no
+    # container, a repeated declaration keeps the slot of the first, and
+    # the setting declares these names itself for the legacy frontend.
+    method IMPL-TOPIC-DECLARATION() {
+        my str $name := self.name;
+        ($name eq '$_' || $name eq '$/' || $name eq '$!')
+          && self.scope eq 'my' && !$!is-parameter
+          && !(nqp::istrue($!already-declared) && !nqp::istrue($!takes-implicit))
+          && !nqp::objprimspec(self.IMPL-OF-TYPE)
+          && !nqp::istrue(nqp::ifnull(nqp::getlexdyn('$*COMPILING_CORE_SETTING'), 0))
+    }
+
+    # The lexical of the scope holding the container the declaration gave
+    # its slot, named on first request.
+    method IMPL-TOPIC-LEXICAL-NAME() {
+        nqp::bindattr_s(self, RakuAST::VarDeclaration::Simple, '$!topic-lexical-name',
+            QAST::Node.unique('!topic_')) unless $!topic-lexical-name;
+        $!topic-lexical-name
+    }
+
+    # The container the slot is given a copy of, shaped as the declaration
+    # asks, or else as the scope shapes the lexical when the declaration
+    # takes the scope's slot, so a taken match variable stays dynamic.
+    method IMPL-TOPIC-PROTOTYPE() {
+        $!takes-implicit && !self.IMPL-ASKS-FOR-CONTAINER
+          ?? RakuAST::VarDeclaration::Implicit::Special.IMPL-SPECIAL-CONTAINER(
+               self.name, self.IMPL-LANGUAGE-REVISION)
+          !! self.meta-object
+    }
+
+    # The container of the declaration's own that the slot takes where the
+    # declaration runs.
+    method IMPL-FRESH-CONTAINER-QAST(RakuAST::IMPL::QASTContext $context, Mu $of) {
+        return self.IMPL-EXPLICIT-CONTAINER-VIVIFY-QAST($context, $of)
+          if self.IMPL-HAS-EXPLICIT-CONTAINER-BASE-TYPE;
+        my $container := self.IMPL-TOPIC-PROTOTYPE;
+        $context.ensure-sc($container);
+        QAST::Op.new( :op('clone_nd'), QAST::WVal.new( :value($container) ) )
     }
 
     method set-where(RakuAST::Expression $where) {
@@ -1747,11 +1812,30 @@ class RakuAST::VarDeclaration::Simple
     }
 
     method IMPL-QAST-DECL(RakuAST::IMPL::QASTContext $context) {
+        # A topic declaration also declares the lexical that holds the
+        # container it gives its slot. One taking the slot leaves declaring
+        # the slot to the scope.
+        if self.IMPL-TOPIC-DECLARATION {
+            my $slot := $!takes-implicit
+                ?? QAST::Op.new(:op<null>)
+                !! self.IMPL-QAST-DECL-SLOT($context);
+            return $slot if $!frameless;
+            my $container := self.IMPL-TOPIC-PROTOTYPE;
+            $context.ensure-sc($container);
+            return QAST::Stmts.new($slot, QAST::Var.new(
+                :scope('lexical'), :decl('contvar'), :value($container),
+                :name(self.IMPL-TOPIC-LEXICAL-NAME) ));
+        }
+        # An `our` taking the slot binds it to the package container.
+        return QAST::Op.new(:op<null>)
+            if $!already-declared && !($!takes-implicit && self.scope eq 'our');
+        self.IMPL-QAST-DECL-SLOT($context)
+    }
+
+    # The slot the declaration makes for the name at frame entry.
+    method IMPL-QAST-DECL-SLOT(RakuAST::IMPL::QASTContext $context) {
         my str $scope := self.scope;
         my $of := $!where ?? $!type.meta-object !! self.IMPL-OF-TYPE;
-
-        return QAST::Op.new(:op<null>)
-            if $!already-declared || ($!shares-implicit && $scope ne 'our');
 
         # An unused implicit slurpy hash builds and binds no hash, but its
         # lexical slot must still exist: the full binder, as run by
@@ -1883,7 +1967,7 @@ class RakuAST::VarDeclaration::Simple
                     :sigil($!sigil), :twigil(self.twigil), :global-fallback);
             $lookup.name('VIVIFY-KEY');
             my $target;
-            if $!shares-implicit {
+            if $!takes-implicit {
                 # The lexical is the scope's already, so the `our` binds it
                 # rather than declaring a container of its own.
                 $target := QAST::Var.new( :scope('lexical'), :name(self.name),
@@ -1936,6 +2020,20 @@ class RakuAST::VarDeclaration::Simple
                 ?? QAST::Var.new( :name($local-name), :scope<local> )
                 !! QAST::Var.new( :$name, :scope<lexical> );
             my $of := self.IMPL-OF-TYPE;
+
+            # A topic declaration puts its container in the lexical of its
+            # scope and binds the name to it. The thunks and phaser blocks
+            # made around its statement may declare the name themselves.
+            my int $takes-slot := self.IMPL-TOPIC-DECLARATION && !$!frameless;
+            my $fresh;
+            if $takes-slot {
+                $var-access := QAST::Var.new( :name(self.IMPL-TOPIC-LEXICAL-NAME), :scope('lexical') );
+                $fresh := QAST::Stmts.new(
+                    QAST::Op.new( :op('bind'), $var-access,
+                        self.IMPL-FRESH-CONTAINER-QAST($context, $of) ),
+                    QAST::Op.new( :op('bind'),
+                        QAST::Var.new( :$name, :scope('lexical') ), $var-access ) );
+            }
 
             if $sigil eq '$' && (my int $primspec := nqp::objprimspec($of)) {
                 # Natively typed value. May need to initialize it to a
@@ -2019,7 +2117,13 @@ class RakuAST::VarDeclaration::Simple
                         # The bind replaces the declared container, so it
                         # targets the variable itself rather than any
                         # instantiate_generic wrap of the access.
-                        $perform-init-qast := self.IMPL-CHECKED-BIND-QAST($context, $init-qast);
+                        $perform-init-qast := $takes-slot
+                            ?? QAST::Stmts.new(
+                                 QAST::Op.new( :op('bind'), $var-access,
+                                     self.IMPL-BIND-ASSERT-QAST($context, $init-qast) ),
+                                 QAST::Op.new( :op('bind'),
+                                     QAST::Var.new( :$name, :scope('lexical') ), $var-access ) )
+                            !! self.IMPL-CHECKED-BIND-QAST($context, $init-qast);
                     }
                     else {
                         # Assignment. Case-analyze by sigil.
@@ -2064,6 +2168,24 @@ class RakuAST::VarDeclaration::Simple
                                     !! $lowered;
                             }
                         }
+                        elsif $takes-slot
+                          && nqp::istype($!initializer, RakuAST::Initializer::Assign) {
+                            # The initializer may read the name, so it is
+                            # evaluated before the slot takes the container.
+                            my str $init-name := QAST::Node.unique('topic_init_');
+                            $perform-init-qast := QAST::Stmts.new(
+                              QAST::Op.new( :op('bind'),
+                                QAST::Var.new( :name($init-name), :scope('local'), :decl('var') ),
+                                $init-qast ),
+                              $fresh,
+                              QAST::Op.new( :op('p6assign'), $var-access,
+                                QAST::Var.new( :name($init-name), :scope('local') ) ) );
+                        }
+                        elsif $takes-slot {
+                            $perform-init-qast := QAST::Stmts.new(
+                              $fresh,
+                              QAST::Op.new( :op('p6assign'), $var-access, $init-qast ) );
+                        }
                         else {
                             # Scalar assignment.
                             $perform-init-qast := QAST::Op.new(
@@ -2085,7 +2207,9 @@ class RakuAST::VarDeclaration::Simple
 
                 # Just a declaration; compile into an access to the variable.
                 else {
-                    $qast := $var-access
+                    $qast := $takes-slot
+                        ?? QAST::Stmts.new( $fresh, $var-access )
+                        !! $var-access;
                 }
             }
         }
@@ -2173,6 +2297,11 @@ class RakuAST::VarDeclaration::Simple
     # VM-level and would not survive the assertion, so the assertion
     # lives here rather than there.
     method IMPL-CHECKED-BIND-QAST(RakuAST::IMPL::QASTContext $context, QAST::Node $source-qast) {
+        self.IMPL-BIND-QAST($context, self.IMPL-BIND-ASSERT-QAST($context, $source-qast))
+    }
+
+    # The value to bind, with the assertion the declared type asks for.
+    method IMPL-BIND-ASSERT-QAST(RakuAST::IMPL::QASTContext $context, QAST::Node $source-qast) {
         my str $sigil := self.sigil;
         if $sigil eq '@' || $sigil eq '%' {
             $source-qast := QAST::Op.new( :op('decont'), $source-qast );
@@ -2197,7 +2326,7 @@ class RakuAST::VarDeclaration::Simple
                     $source-qast, QAST::WVal.new( :value($type) ));
             }
         }
-        self.IMPL-BIND-QAST($context, $source-qast)
+        $source-qast
     }
 
     method IMPL-EXPR-QAST(RakuAST::IMPL::QASTContext $context) {
@@ -3098,6 +3227,12 @@ class RakuAST::VarDeclaration::Implicit::Special
   does RakuAST::Meta
 {
     method PRODUCE-META-OBJECT(:$resolver, :$context) {
+        self.IMPL-SPECIAL-CONTAINER(self.name, self.IMPL-LANGUAGE-REVISION)
+    }
+
+    # A container for a special variable of the given name, shaped as the
+    # language revision shapes it.
+    method IMPL-SPECIAL-CONTAINER(str $name, $revision) {
         # Reuse the container descriptor for the common cases that we expect
         # to have.
         # Mu nominals use Untyped so Scalar STORE skips the type check that
@@ -3124,9 +3259,9 @@ class RakuAST::VarDeclaration::Implicit::Special
                 '$!', ContainerDescriptor::Untyped.new(:of(Mu), :default(Nil), :dynamic, :name('$!'))
             )
         );
-        my $cont-desc := COMMON[self.IMPL-LANGUAGE-REVISION]{self.name} //
+        my $cont-desc := COMMON[$revision]{$name} //
             RakuAST::IMPL::Containers.create-descriptor(
-                :of(Mu), :default(Any), :dynamic(0), :name(self.name));
+                :of(Mu), :default(Any), :dynamic(0), :name($name));
         my $container := nqp::create(Scalar);
         nqp::bindattr($container, Scalar, '$!descriptor', $cont-desc);
         nqp::bindattr($container, Scalar, '$!value', $cont-desc.default);
