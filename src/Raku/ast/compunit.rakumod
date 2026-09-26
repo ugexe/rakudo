@@ -664,6 +664,18 @@ class RakuAST::CompUnit
             $context.add-fixup-and-deserialize-task(QAST::Stmt.new($global_install));
         }
 
+        # The unit's lexicals are declared beside the `__args__` parameter
+        # at the head of the block, so the setup a phaser adds there runs
+        # after an EVAL's topic is bound to that of its caller.
+        $top-level[0].push(QAST::Var.new(
+          :name('__args__'), :scope('local'), :decl('param'), :slurpy(1) ));
+        # The declarations ask for the unit through $*CU, and carry the
+        # code the unit declares, so a unit `use fatal` must wrap them.
+        {
+            my $*CU := self;
+            $top-level[0].push(self.IMPL-MAYBE-FATALIZE-QAST(self.IMPL-QAST-DECLS($context)));
+        }
+
         # Compile into a QAST::CompUnit.
         $top-level.push(self.IMPL-TO-QAST($context));
         $!mainline.IMPL-LINK-META-OBJECT($context, $top-level);
@@ -817,8 +829,6 @@ class RakuAST::CompUnit
         self.IMPL-SET-NODE:
             self.IMPL-MAYBE-FATALIZE-QAST:
                 QAST::Stmts.new(
-                    QAST::Var.new( :name('__args__'), :scope('local'), :decl('param'), :slurpy(1) ),
-                    self.IMPL-QAST-DECLS($context),
                     self.IMPL-QAST-INIT-PHASERS($context),
                     self.IMPL-QAST-END-PHASERS($context),
                     self.IMPL-QAST-CTXSAVE($context),
@@ -870,7 +880,7 @@ class RakuAST::CompUnit
     }
 
     method IMPL-ADD-ENTER-PHASERS-TO-QAST(QAST::Node $qast, QAST::Node $enter-setup) {
-        $qast[2][2].push($enter-setup); # Add them after INIT phasers
+        $qast[2][0].push($enter-setup); # Add them after INIT phasers
     }
 
     method generated-global() {
