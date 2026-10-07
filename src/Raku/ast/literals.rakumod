@@ -256,7 +256,7 @@ class RakuAST::QuotedString
 
     # Whether anything in the string is interpolated, a nested quote
     # counts by its own segments
-    method has-variables() {
+    method has-variables(--> Bool) {
         for $!segments {
             my $segment := nqp::istype($_,RakuAST::QuoteWordsAtom) ?? $_.atom !! $_;
             return True unless nqp::istype($segment,RakuAST::StrLiteral)
@@ -418,7 +418,7 @@ class RakuAST::QuotedString
     }
 
     # Checks if this is an empty words list, as seen in a form like %h<>.
-    method is-empty-words() {
+    method is-empty-words(--> Bool) {
         # Is it empty?
         return False if nqp::elems($!segments) >= 2;
         if nqp::elems($!segments) == 1 {

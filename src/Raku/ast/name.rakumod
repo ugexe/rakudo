@@ -119,7 +119,7 @@ class RakuAST::Name
         !self.is-empty && !self.is-anonymous
     }
 
-    method is-simple() {
+    method is-simple(--> Bool) {
         for $!parts {
             return False unless nqp::istype($_, RakuAST::Name::Part::Simple);
         }
@@ -150,7 +150,7 @@ class RakuAST::Name
         $name
     }
 
-    method is-indirect-lookup() {
+    method is-indirect-lookup(--> Bool) {
         for $!parts {
             return True if nqp::istype($_, RakuAST::Name::Part::Expression);
         }
@@ -163,7 +163,7 @@ class RakuAST::Name
 
     method has-colonpairs(--> Bool) { nqp::istrue($!colonpairs) }
 
-    method has-colonpair($key) {
+    method has-colonpair($key --> Bool) {
         if $!colonpairs {
             for $!colonpairs {
                 return True if $_.key eq $key;

@@ -292,7 +292,7 @@ class RakuAST::Var::Attribute
 
     method sigil() { nqp::substr($!name, 0, 1) }
 
-    method can-be-bound-to() {
+    method can-be-bound-to(--> Bool) {
         # stubbed-meta-object gives you the type object without trying to compose it first.
         my $package := $!package.stubbed-meta-object;
         if $package.HOW.has_attribute($package, $!name) {

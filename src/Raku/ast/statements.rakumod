@@ -676,7 +676,7 @@ class RakuAST::StatementList
     }
 
     # Return whether there are any whenevers
-    method any-whenevers() {
+    method any-whenevers(--> Bool) {
         for $!statements {
             return True
               if nqp::istype($_,RakuAST::Statement::Whenever)

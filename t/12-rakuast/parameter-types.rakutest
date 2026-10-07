@@ -1,7 +1,7 @@
 use v6.e.PREVIEW;
 use Test;
 
-plan 26; # Do not change this file to done-testing
+plan 28; # Do not change this file to done-testing
 
 # The node methods are generated from declarations that look like Raku
 # signatures. These tests cover what the declared parameter and return
@@ -441,6 +441,63 @@ subtest 'Node predicates return a Bool' => {
     my $term := RakuAST::Term::Name.new(RakuAST::Name.from-identifier('Int'));
     $term.set-resolution($int);
     is-deeply $term.has-compile-time-value, True, 'a resolved type name has a compile time value';
+}
+
+subtest 'A predicate that returns early gives a Bool' => {
+    plan 16;
+    my $simple := RakuAST::Name.from-identifier('foo');
+    is-deeply $simple.is-simple, True, 'a name of simple parts is simple';
+    is-deeply RakuAST::Name.new(
+      RakuAST::Name::Part::Expression.new(RakuAST::StrLiteral.new('foo'))
+    ).is-simple, False, 'a name with an expression part is not simple';
+    my $adverbed := RakuAST::Name.from-identifier('foo');
+    $adverbed.add-colonpair(RakuAST::ColonPair::True.new('bar'));
+    is-deeply $adverbed.has-colonpair('bar'), True, 'a name has a colonpair it was given';
+    is-deeply $adverbed.has-colonpair('baz'), False, 'a name lacks a colonpair it was not given';
+    is-deeply RakuAST::QuotedString.new(segments => (RakuAST::Var::Lexical.new('$x'),)).has-variables,
+      True, 'a string with a variable has variables';
+    is-deeply RakuAST::QuotedString.new(segments => (), processors => ('words',)).is-empty-words,
+      True, 'an empty words list is empty words';
+    is-deeply RakuAST::QuotedString.new(
+      segments => (RakuAST::StrLiteral.new('a'),), processors => ('words',)
+    ).is-empty-words, False, 'a words list of a non-empty literal is not empty words';
+    my $first := RakuAST::Block.new;
+    $first.add-phaser('FIRST', RakuAST::StatementPrefix::Phaser::First.new(RakuAST::Block.new));
+    is-deeply $first.has-loop-phasers, True, 'a block with a FIRST phaser has loop phasers';
+    is-deeply RakuAST::Block.new.has-any-phasers, False, 'a new block has no phasers';
+    is-deeply RakuAST::Block.new.has-loop-phasers, False, 'a new block has no loop phasers';
+    my $next := RakuAST::Block.new;
+    $next.meta-object.add_phaser('NEXT', -> {});
+    is-deeply $next.has-loop-phasers, True,
+      'a block whose code object has a NEXT phaser has loop phasers';
+    is-deeply $next.has-any-phasers, True,
+      'a block whose code object has a phaser has phasers';
+    my $x := RakuAST::Name.from-identifier('x');
+    is-deeply RakuAST::VarDeclaration::Simple.new(sigil => '@', desigilname => $x).can-be-bound-to,
+      True, 'a my array can be bound to';
+    is-deeply RakuAST::VarDeclaration::Simple.new(
+      sigil => '$', desigilname => $x, scope => 'has'
+    ).can-be-bound-to, False, 'an attribute declaration cannot be bound to';
+    package P { }
+    is-deeply RakuAST::Declaration::External::Constant.new(
+      lexical-name => 'P', compile-time-value => P
+    ).is-stub, True, 'a declaration of a package is a stub';
+    cmp-ok RakuAST::Name.^find_method('is-simple').signature.returns, '===', Bool,
+      'a predicate that returns early introspects as returning Bool';
+}
+
+subtest 'A predicate that returns early still checks the value it ends with' => {
+    plan 2;
+    my class StrSignature is RakuAST::Signature {
+        method provides-return-value() { 'yes' }
+    }
+    my $foo := RakuAST::Name.from-identifier('foo');
+    throws-like { RakuAST::Sub.new(name => $foo, signature => StrSignature.new).is-boundary-sunk },
+      X::TypeCheck::Return, expected => Bool, got => 'yes',
+      'a sub fails the Bool check on a Str its signature gives';
+    throws-like { RakuAST::Method.new(name => $foo, signature => StrSignature.new).is-boundary-sunk },
+      X::TypeCheck::Return, expected => Bool, got => 'yes',
+      'a method fails the Bool check on a Str its signature gives';
 }
 
 # vim: expandtab shiftwidth=4

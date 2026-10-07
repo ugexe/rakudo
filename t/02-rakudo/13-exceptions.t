@@ -1,6 +1,6 @@
 use Test;
 
-plan 14;
+plan 15;
 
 # GH #2739
 # Prior to the fix the original exception would be lost hidden under 'no handler found' error.
@@ -190,6 +190,17 @@ subtest "Items that were never bound don't throw *re*binding errors", {
         throws-like {$!.throw}, X::Bind,             'Binding to a pseudo-package LHS throws X::Bind' }
 }
 
+subtest 'A bind to an attribute checks the attribute is not native' => {
+    plan 4;
+    throws-like q[class C1 { has int $!x; method m { $!x := 5 } }], X::Comp,
+      message => /bind/, 'a bind to a native attribute is refused';
+    throws-like q[class C2 { has int $x; method m { $x := 5 } }], X::Comp,
+      message => /bind/, 'a bind to the alias of a native attribute is refused';
+    is EVAL(q[class C3 { has $!x; method m { $!x := 5; $!x } }; C3.new.m]), 5,
+      'a bind to an attribute is allowed';
+    is EVAL(q[class C4 { has $x; method m { $x := 6; $x } }; C4.new.m]), 6,
+      'a bind to the alias of an attribute is allowed';
+}
 
 done-testing;
 

@@ -1772,33 +1772,24 @@ role RakuAST::ScopePhaser {
         nqp::getattr(self, RakuAST::ScopePhaser, '$!is-loop-body') // False
     }
 
-    method has-loop-phasers() {
+    method has-loop-phasers(--> Bool) {
         return True if $!FIRST || $!NEXT || $!LAST;
-        if nqp::istype(self, RakuAST::Meta) {
-            my $phasers := nqp::getattr(self.meta-object, Block, '$!phasers');
-            nqp::ishash($phasers) && (
-                nqp::existskey($phasers, 'FIRST')
-                || nqp::existskey($phasers, 'NEXT')
-                || nqp::existskey($phasers, 'LAST')
-            ) ?? True !! False
-        }
-        else {
-            False
-        }
+        nqp::istype(self, RakuAST::Meta)
+          && nqp::ishash(my $phasers := nqp::getattr(self.meta-object, Block, '$!phasers'))
+          && (
+              nqp::existskey($phasers, 'FIRST')
+              || nqp::existskey($phasers, 'NEXT')
+              || nqp::existskey($phasers, 'LAST')
+          )
     }
 
-    method has-any-phasers() {
+    method has-any-phasers(--> Bool) {
         return True
           if $!ENTER || $!LEAVE || $!KEEP  || $!UNDO || $!FIRST || $!NEXT
           || $!LAST  || $!PRE   || $!POST  || $!QUIT || $!TEMP  || $!CLOSE
           || $!let   || $!temp;
-        if nqp::istype(self, RakuAST::Meta) {
-            nqp::isconcrete(nqp::getattr(self.meta-object, Block, '$!phasers'))
-              ?? True !! False
-        }
-        else {
-            False
-        }
+        nqp::istype(self, RakuAST::Meta)
+          && nqp::isconcrete(nqp::getattr(self.meta-object, Block, '$!phasers'))
     }
 
     method add-list-to-code-object(Str $attr, $code-object) {
@@ -4109,7 +4100,7 @@ class RakuAST::Sub
         $!body.statement-list
     }
 
-    method is-boundary-sunk() {
+    method is-boundary-sunk(--> Bool) {
         return False if self.needs-result;
         my $signature := self.signature;
         $signature ?? $signature.provides-return-value !! False
@@ -4607,7 +4598,7 @@ class RakuAST::Method
         $!body.statement-list
     }
 
-    method is-boundary-sunk() {
+    method is-boundary-sunk(--> Bool) {
         return False if self.needs-result;
         my $signature := self.signature;
         $signature ?? $signature.provides-return-value !! False

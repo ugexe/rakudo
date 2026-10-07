@@ -1045,7 +1045,7 @@ class RakuAST::VarDeclaration::Simple
         }
     }
 
-    method can-be-bound-to() {
+    method can-be-bound-to(--> Bool) {
         # Must be lexical and non-native.
         if $!is-bindable && (self.scope eq 'my' || self.scope eq 'our' || self.scope eq 'state') {
             my str $sigil := self.sigil;
@@ -3140,7 +3140,7 @@ class RakuAST::VarDeclaration::AttributeAlias
         'my'
     }
 
-    method can-be-bound-to() {
+    method can-be-bound-to(--> Bool) {
         # stubbed-meta-object gives you the type object without trying to compose it first.
         my $package := $!attribute.attribute-package.stubbed-meta-object;
         my $name := self.IMPL-ATTRIBUTE-NAME;

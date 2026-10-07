@@ -756,7 +756,7 @@ class RakuAST::Resolver {
     }
 
     # Check if a name is a known type.
-    method is-name-type(RakuAST::Name $Rname) {
+    method is-name-type(RakuAST::Name $Rname --> Bool) {
         # An indirect lookup is a term, not a type name, even when its
         # constant string names a known type: the symbol is looked up at
         # run time.
